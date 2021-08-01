@@ -65,7 +65,7 @@ pub const Scanner = struct {
             try self.scanToken();
         }
 
-        try self.tokens.append(Token.init(TT.EOF, "", Lit.none, self.line));
+        try self.tokens.append(Token.init(TT.EOF, "", null, self.line));
         return self.tokens;
     }
 
@@ -207,10 +207,10 @@ pub const Scanner = struct {
     }
 
     fn addToken(self: *@This(), typ: TT) !void {
-        try self.addTokenLit(typ, Lit.none);
+        try self.addTokenLit(typ, null);
     }
 
-    fn addTokenLit(self: *@This(), typ: TT, literal: Lit) !void {
+    fn addTokenLit(self: *@This(), typ: TT, literal: ?Lit) !void {
         const text = self.source[self.start..self.current];
         try self.tokens.append(Token.init(typ, text, literal, self.line));
     }

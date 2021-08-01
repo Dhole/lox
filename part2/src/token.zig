@@ -1,5 +1,7 @@
 const std = @import("std");
 
+const FmtOpts = std.fmt.FormatOptions;
+
 pub const TokenType = enum {
 // Single-character tokens.
 LEFT_PAREN, RIGHT_PAREN, LEFT_BRACE, RIGHT_BRACE, COMMA, DOT, MINUS, PLUS, SEMICOLON, SLASH, STAR,
@@ -18,15 +20,14 @@ pub const Token = struct {
         identifier: []const u8,
         string: []const u8,
         number: f64,
-        none,
     };
 
     type: TokenType,
     lexeme: []const u8,
-    literal: Literal,
+    literal: ?Literal,
     line: u32,
 
-    pub fn init(typ: TokenType, lexeme: []const u8, literal: Literal, line: u32) @This() {
+    pub fn init(typ: TokenType, lexeme: []const u8, literal: ?Literal, line: u32) @This() {
         return @This(){
             .type = typ,
             .lexeme = lexeme,
@@ -35,22 +36,20 @@ pub const Token = struct {
         };
     }
 
-    pub fn format(
-        self: @This(),
-        comptime fmt: []const u8,
-        options: std.fmt.FormatOptions,
-        writer: anytype,
-    ) !void {
-        _ = options;
+    pub fn format(self: @This(), comptime fmt: []const u8, opts: FmtOpts, w: anytype) !void {
+        _ = opts;
         _ = fmt;
-        try writer.print("{{type:{any}, lexeme:{s}, literal:", .{ self.type, self.lexeme });
-        switch (self.literal) {
-            .identifier => |*v| try writer.print("{s}", .{v.*}),
-            .string => |*v| try writer.print("{s}", .{v.*}),
-            .number => |*v| try writer.print("{d}", .{v.*}),
-            .none => |_| {},
+        try w.print("{{type:{any}, lexeme:{s}, literal:", .{ self.type, self.lexeme });
+        if (self.literal) |lit| {
+            switch (lit) {
+                .identifier => |*v| try w.print("{s}", .{v.*}),
+                .string => |*v| try w.print("{s}", .{v.*}),
+                .number => |*v| try w.print("{d}", .{v.*}),
+            }
+        } else {
+            try w.print("null", .{});
         }
-        try writer.print("}}", .{});
+        try w.print("}}", .{});
     }
 };
 
