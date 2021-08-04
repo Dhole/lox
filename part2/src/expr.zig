@@ -5,13 +5,13 @@ const Lit = token.Token.Literal;
 const TT = token.TokenType;
 
 pub const Binary = struct {
-    left: *Expr,
+    left: *const Expr,
     operator: Token,
-    right: *Expr,
+    right: *const Expr,
 };
 
 pub const Grouping = struct {
-    expression: *Expr,
+    expression: *const Expr,
 };
 
 pub const Literal = struct {
@@ -22,7 +22,7 @@ pub const Literal = struct {
 
 pub const Unary = struct {
     operator: Token,
-    right: *Expr,
+    right: *const Expr,
 };
 
 pub const Expr = union(enum) {
@@ -32,7 +32,7 @@ pub const Expr = union(enum) {
     unary: Unary,
 };
 
-fn parenthesize(w: anytype, name: []const u8, exprs: []const *Expr) anyerror!void {
+fn parenthesize(w: anytype, name: []const u8, exprs: []const *const Expr) anyerror!void {
     try w.print("({s}", .{name});
     for (exprs) |expr| {
         try w.print(" ", .{});
@@ -41,30 +41,28 @@ fn parenthesize(w: anytype, name: []const u8, exprs: []const *Expr) anyerror!voi
     try w.print(")", .{});
 }
 
-pub fn printAst(w: anytype, expr: *Expr) !void {
+pub fn printAst(w: anytype, expr: *const Expr) !void {
     switch (expr.*) {
         .binary => |*e| {
-            try parenthesize(w, e.operator.lexeme, &([_]*Expr{ e.left, e.right }));
+            try parenthesize(w, e.operator.lexeme, &([_]*const Expr{ e.left, e.right }));
         },
-        .grouping => |*e| try parenthesize(w, "group", &([_]*Expr{e.expression})),
+        .grouping => |*e| try parenthesize(w, "group", &([_]*const Expr{e.expression})),
         .literal => |*e| try w.print("{s}", .{e.value}),
-        .unary => |*e| try parenthesize(w, e.operator.lexeme, &([_]*Expr{e.right})),
+        .unary => |*e| try parenthesize(w, e.operator.lexeme, &([_]*const Expr{e.right})),
     }
 }
 
 const std = @import("std");
 
 test "expr" {
-    var a: f64 = 123.0;
-    var b: f64 = 45.67;
     var e = Expr{ .binary = Binary{
         .left = &Expr{ .unary = Unary{
             .operator = Token.init(TT.MINUS, "-", null, 1),
-            .right = &Expr{ .literal = Literal{ .value = Lit{ .number = a } } },
+            .right = &Expr{ .literal = Literal{ .value = Lit{ .number = 123.0 } } },
         } },
         .operator = Token.init(TT.STAR, "*", null, 1),
         .right = &Expr{ .grouping = Grouping{
-            .expression = &Expr{ .literal = Literal{ .value = Lit{ .number = b } } },
+            .expression = &Expr{ .literal = Literal{ .value = Lit{ .number = 45.67 } } },
         } },
     } };
     var w = std.io.getStdErr().writer();
