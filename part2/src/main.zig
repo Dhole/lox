@@ -2,7 +2,12 @@ const std = @import("std");
 
 const token = @import("token.zig");
 const scanner = @import("scanner.zig");
+const expr = @import("expr.zig");
+const parser = @import("parser.zig");
 const helpers = @import("helpers.zig");
+
+const Expr = expr.Expr;
+const Parser = parser.Parser;
 
 const MAX_FILE_SIZE = 0x1000000;
 
@@ -58,9 +63,23 @@ fn runPrompt() !u8 {
 fn run(bytes: []u8) !void {
     // std.log.info("{any}", .{bytes});
     var s = try scanner.Scanner.init(&gpa.allocator, bytes);
+    defer s.deinit();
     const tokens = try s.scanTokens();
 
-    for (tokens.items) |t| {
-        std.log.info("{any}", .{t});
+    var exp: *Expr = undefined;
+    var p = Parser.init(&gpa.allocator, tokens);
+    defer p.deinit();
+
+    if (p.parse()) |e| {
+        exp = e;
+    } else {
+        return;
     }
+
+    if (helpers.hadError) {
+        return;
+    }
+
+    var w = std.io.getStdErr().writer();
+    try expr.printAst(w, exp);
 }

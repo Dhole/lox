@@ -16,6 +16,8 @@ IDENTIFIER, STRING, NUMBER,
 AND, CLASS, ELSE, FALSE, FUN, FOR, IF, NIL, OR, PRINT, RETURN, SUPER, THIS, TRUE, VAR, WHILE, EOF };
 
 pub const Token = struct {
+    const Self = @This();
+
     pub const Literal = union(enum) {
         identifier: []const u8,
         string: []const u8,
@@ -27,8 +29,8 @@ pub const Token = struct {
     literal: ?Literal,
     line: u32,
 
-    pub fn init(typ: TokenType, lexeme: []const u8, literal: ?Literal, line: u32) @This() {
-        return @This(){
+    pub fn init(typ: TokenType, lexeme: []const u8, literal: ?Literal, line: u32) Self {
+        return Self{
             .type = typ,
             .lexeme = lexeme,
             .literal = literal,
@@ -36,7 +38,7 @@ pub const Token = struct {
         };
     }
 
-    pub fn format(self: @This(), comptime fmt: []const u8, opts: FmtOpts, w: anytype) !void {
+    pub fn format(self: Self, comptime fmt: []const u8, opts: FmtOpts, w: anytype) !void {
         _ = opts;
         _ = fmt;
         try w.print("{{type:{any}, lexeme:{s}, literal:", .{ self.type, self.lexeme });

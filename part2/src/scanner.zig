@@ -11,6 +11,8 @@ const TT = token.TokenType;
 const Lit = token.Token.Literal;
 
 pub const Scanner = struct {
+    const Self = @This();
+
     allocator: *Allocator,
     keywords: std.StringHashMap(TT),
     source: []const u8,
@@ -40,9 +42,9 @@ pub const Scanner = struct {
         return keywords;
     }
 
-    pub fn init(allocator: *Allocator, source: []const u8) !@This() {
+    pub fn init(allocator: *Allocator, source: []const u8) !Self {
         const keywords = try keywordsInit(allocator);
-        return @This(){
+        return Self{
             .allocator = allocator,
             .keywords = keywords,
             .source = source,
@@ -53,12 +55,12 @@ pub const Scanner = struct {
         };
     }
 
-    pub fn deinit(self: *@This()) void {
+    pub fn deinit(self: *Self) void {
         self.keywords.deinit();
         self.tokens.deinit();
     }
 
-    pub fn scanTokens(self: *@This()) !ArrayList(Token) {
+    pub fn scanTokens(self: *Self) !ArrayList(Token) {
         while (!self.isAtEnd()) {
             // We are at the beginning of the next lexeme.
             self.start = self.current;
@@ -69,7 +71,7 @@ pub const Scanner = struct {
         return self.tokens;
     }
 
-    fn scanToken(self: *@This()) !void {
+    fn scanToken(self: *Self) !void {
         const c = self.advance();
         const token_type = switch (c) {
             '(' => TT.LEFT_PAREN,
@@ -124,21 +126,21 @@ pub const Scanner = struct {
         try self.addToken(token_type);
     }
 
-    fn advance(self: *@This()) u8 {
+    fn advance(self: *Self) u8 {
         const c = self.source[self.current];
         self.current += 1;
         return c;
     }
 
-    fn peek(self: *@This()) u8 {
+    fn peek(self: *Self) u8 {
         return if (self.isAtEnd()) '\x00' else self.source[self.current];
     }
 
-    fn peekNext(self: *@This()) u8 {
+    fn peekNext(self: *Self) u8 {
         return if (self.current + 1 >= self.source.len) '\x00' else self.source[self.current + 1];
     }
 
-    fn match(self: *@This(), expected: u8) bool {
+    fn match(self: *Self, expected: u8) bool {
         if (self.isAtEnd()) {
             return false;
         }
@@ -149,7 +151,7 @@ pub const Scanner = struct {
         return true;
     }
 
-    fn string(self: *@This()) !void {
+    fn string(self: *Self) !void {
         while (self.peek() != '"' and !self.isAtEnd()) {
             if (self.peek() == '\n') {
                 self.line += 1;
@@ -168,7 +170,7 @@ pub const Scanner = struct {
         try self.addTokenLit(TT.STRING, Lit{ .string = value });
     }
 
-    fn number(self: *@This()) !void {
+    fn number(self: *Self) !void {
         while (isDigit(self.peek())) {
             _ = self.advance();
         }
@@ -185,7 +187,7 @@ pub const Scanner = struct {
         try self.addTokenLit(TT.NUMBER, Lit{ .number = num });
     }
 
-    fn identifier(self: *@This()) !void {
+    fn identifier(self: *Self) !void {
         while (isAlphaNumeric(self.peek())) {
             _ = self.advance();
         }
@@ -206,16 +208,16 @@ pub const Scanner = struct {
         return isAlpha(c) or isDigit(c);
     }
 
-    fn addToken(self: *@This(), typ: TT) !void {
+    fn addToken(self: *Self, typ: TT) !void {
         try self.addTokenLit(typ, null);
     }
 
-    fn addTokenLit(self: *@This(), typ: TT, literal: ?Lit) !void {
+    fn addTokenLit(self: *Self, typ: TT, literal: ?Lit) !void {
         const text = self.source[self.start..self.current];
         try self.tokens.append(Token.init(typ, text, literal, self.line));
     }
 
-    fn isAtEnd(self: *@This()) bool {
+    fn isAtEnd(self: *Self) bool {
         return self.current >= self.source.len;
     }
 };
