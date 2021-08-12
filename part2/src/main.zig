@@ -5,9 +5,11 @@ const scanner = @import("scanner.zig");
 const expr = @import("expr.zig");
 const parser = @import("parser.zig");
 const helpers = @import("helpers.zig");
+const interpreter = @import("interpreter.zig");
 
 const Expr = expr.Expr;
 const Parser = parser.Parser;
+const interpret = interpreter.interpret;
 
 const MAX_FILE_SIZE = 0x1000000;
 
@@ -39,6 +41,9 @@ fn runFile(path: []u8) !u8 {
     if (helpers.hadError) {
         return 65;
     }
+    if (helpers.hadRuntimeError) {
+        return 70;
+    }
     return 0;
 }
 
@@ -54,6 +59,7 @@ fn runPrompt() !u8 {
         if (line) |l| {
             try run(l);
             helpers.hadError = false;
+            helpers.hadRuntimeError = false;
         } else {
             return 0;
         }
@@ -80,6 +86,8 @@ fn run(bytes: []u8) !void {
         return;
     }
 
-    var w = std.io.getStdErr().writer();
-    try expr.printAst(w, exp);
+    var w = std.io.getStdOut().writer();
+    try interpret(w, exp);
+    // try expr.printAst(w, exp);
+
 }

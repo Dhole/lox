@@ -22,37 +22,10 @@ pub const ValueTag = enum {
 };
 
 pub const Value = union(ValueTag) {
-    const Self = @This();
-
     boolean: bool,
     number: f64,
     string: []const u8,
     nil,
-
-    pub fn asBoolean(self: *const Self) !bool {
-        return switch (self.*) {
-            .boolean => |v| v,
-            else => error.InvalidType,
-        };
-    }
-    pub fn asNumber(self: *const Self) !f64 {
-        return switch (self.*) {
-            .number => |v| v,
-            else => error.InvalidType,
-        };
-    }
-    pub fn asString(self: *const Self) ![]const u8 {
-        return switch (self.*) {
-            .string => |v| v,
-            else => error.InvalidType,
-        };
-    }
-    pub fn asNil(self: *const Self) !void {
-        return switch (self.*) {
-            .nil => void,
-            else => error.InvalidType,
-        };
-    }
 };
 
 pub const Literal = struct {

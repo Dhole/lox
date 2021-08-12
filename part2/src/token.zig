@@ -41,7 +41,7 @@ pub const Token = struct {
     pub fn format(self: Self, comptime fmt: []const u8, opts: FmtOpts, w: anytype) !void {
         _ = opts;
         _ = fmt;
-        try w.print("{{type:{any}, lexeme:{s}, literal:", .{ self.type, self.lexeme });
+        try w.print("{{line: {d}, type:{any}, lexeme:{s}, literal:", .{ self.line, self.type, self.lexeme });
         if (self.literal) |lit| {
             switch (lit) {
                 .identifier => |*v| try w.print("{s}", .{v.*}),

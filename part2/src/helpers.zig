@@ -1,11 +1,14 @@
 const std = @import("std");
 
+const FmtOpts = std.fmt.FormatOptions;
+
 const token = @import("token.zig");
 
 const Token = token.Token;
 const TT = token.TokenType;
 
 pub var hadError = false;
+pub var hadRuntimeError = false;
 
 // Originally "error"
 pub fn printLineErr(line: u32, msg: []const u8) void {
@@ -32,4 +35,22 @@ pub fn printTokenErr(t: Token, message: []const u8) void {
 pub fn report(line: u32, where: []const u8, msg: []const u8) void {
     std.log.err("[line {d}] Error {s}: {s}", .{ line, where, msg });
     hadError = true;
+}
+
+pub const RuntimeError = struct {
+    const Self = @This();
+    tok: Token,
+    msg: []const u8,
+
+    pub fn format(self: Self, comptime fmt: []const u8, opts: FmtOpts, w: anytype) !void {
+        _ = opts;
+        _ = fmt;
+        try w.print("{{token:{s}, msg:{s}}}", .{ self.tok, self.msg });
+    }
+};
+
+// Originally "runtimeError"
+pub fn reportRuntimeError(e: RuntimeError) void {
+    std.log.err("[line {d}] {s}", .{ e.tok.line, e.msg });
+    hadRuntimeError = true;
 }
