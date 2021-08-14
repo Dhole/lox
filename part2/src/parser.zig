@@ -5,6 +5,7 @@ const Allocator = std.mem.Allocator;
 
 const token = @import("token.zig");
 const expr = @import("expr.zig");
+const stmt = @import("stmt.zig");
 const helpers = @import("helpers.zig");
 
 const Token = token.Token;
@@ -14,17 +15,20 @@ const Grouping = expr.Grouping;
 const Literal = expr.Literal;
 const Unary = expr.Unary;
 const Expr = expr.Expr;
+const Stmt = stmt.Stmt;
 
 pub const Parser = struct {
     const Self = @This();
     const Error = error{ ParseError, OutOfMemory };
 
+    allocator: *Allocator,
     arena: std.heap.ArenaAllocator,
     tokens: ArrayList(Token),
     current: u32,
 
     pub fn init(allocator: *Allocator, tokens: ArrayList(Token)) Self {
         return Self{
+            .allocator = allocator,
             .arena = std.heap.ArenaAllocator.init(allocator),
             .tokens = tokens,
             .current = 0,
@@ -35,13 +39,31 @@ pub const Parser = struct {
         self.arena.deinit();
     }
 
-    pub fn parse(self: *Self) ?*Expr {
-        return self.expression() catch |e| {
-            switch (e) {
-                error.ParseError => return null,
-                else => unreachable,
-            }
-        };
+    pub fn parse(self: *Self) !ArrayList(Stmt) {
+        var statements = ArrayList(Stmt).init(&self.arena.allocator);
+        while (!self.isAtEnd()) {
+            try statements.append(try self.statement());
+        }
+        return statements;
+    }
+
+    fn statement(self: *Self) !Stmt {
+        if (self.match(&.{TT.PRINT})) {
+            return self.printStatement();
+        }
+        return self.expressionStatement();
+    }
+
+    fn printStatement(self: *Self) !Stmt {
+        var value = try self.expression();
+        _ = try self.consume(TT.SEMICOLON, "Expect ';' after value.");
+        return Stmt{ .print = value };
+    }
+
+    fn expressionStatement(self: *Self) !Stmt {
+        var value = try self.expression();
+        _ = try self.consume(TT.SEMICOLON, "Expect ';' after expression.");
+        return Stmt{ .expression = value };
     }
 
     fn expression(self: *Self) !*Expr {
@@ -217,18 +239,20 @@ test "parser" {
     const Scanner = scanner.Scanner;
 
     var gpa = std.heap.GeneralPurposeAllocator(.{}){};
-    var s = try Scanner.init(&gpa.allocator, "(1 + 2 * 3) <= 4 * 5 - 6");
+    var s = try Scanner.init(&gpa.allocator, "(1 + 2 * 3) <= 4 * 5 - 6;");
     defer s.deinit();
     var tokens = try s.scanTokens();
     var parser = Parser.init(&gpa.allocator, tokens);
     defer parser.deinit();
-    var exp: *Expr = undefined;
-    if (parser.parse()) |e| {
-        exp = e;
-    } else {
-        unreachable;
-    }
+    // var exp: *Expr = undefined;
+    // if (parser.parse()) |e| {
+    //     exp = e;
+    // } else {
+    //     unreachable;
+    // }
+    var statements = try parser.parse();
+    std.debug.print("{s}", .{statements.items});
 
-    var w = std.io.getStdErr().writer();
-    try expr.printAst(w, exp);
+    // var w = std.io.getStdErr().writer();
+    // try expr.printAst(w, exp);
 }

@@ -30,7 +30,6 @@ pub const Value = union(ValueTag) {
 
 pub const Literal = struct {
     // This is Object in the reference implementation
-    // TODO: Replace by an enum once we know all possible types
     value: Value,
 };
 
