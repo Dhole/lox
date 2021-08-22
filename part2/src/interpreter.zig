@@ -1,5 +1,6 @@
 const std = @import("std");
 
+const ArrayList = std.ArrayList;
 const Allocator = std.mem.Allocator;
 
 const expr = @import("expr.zig");
@@ -24,21 +25,26 @@ const Binary = expr.Binary;
 const Stmt = stmt.Stmt;
 const Environment = environment.Environment;
 
-const Error = error{ RuntimeError, OutOfMemory };
+const Error = error{ RuntimeError, OutOfMemory } || std.os.WriteError;
 
 pub const Interpreter = struct {
     const Self = @This();
 
-    environment: Environment,
+    allocator: *Allocator,
+    env: *Environment,
 
-    pub fn init(allocator: *Allocator) Self {
+    pub fn init(allocator: *Allocator) !Self {
+        var env = (try allocator.create(Environment));
+        env.* = Environment.init(allocator, null);
         return Self{
-            .environment = Environment.init(allocator),
+            .allocator = allocator,
+            .env = env,
         };
     }
 
     pub fn deinit(self: *Self) void {
-        self.environment.deinit();
+        self.env.deinit();
+        self.allocator.destroy(self.env);
         return;
     }
 
@@ -94,12 +100,12 @@ pub const Interpreter = struct {
     }
 
     fn evalVar(self: *Self, c: *Context, exp: *const Variable) Error!Value {
-        return self.environment.get(c, exp.name);
+        return self.env.get(c, exp.name);
     }
 
     fn evalAssign(self: *Self, c: *Context, exp: *const Assign) Error!Value {
         const val = try self.eval(c, exp.value);
-        try self.environment.assign(c, exp.name, val);
+        try self.env.assign(c, exp.name, val);
         return val;
     }
 
@@ -167,7 +173,18 @@ pub const Interpreter = struct {
         };
     }
 
-    pub fn exec(self: *Self, c: *Context, w: anytype, stm: *const Stmt) !void {
+    fn execBlock(self: *Self, c: *Context, w: anytype, statements: ArrayList(Stmt), env: *Environment) !void {
+        var previous = self.env;
+        self.env = env;
+        defer {
+            self.env = previous;
+        }
+        for (statements.items) |*stm| {
+            try self.exec(c, w, stm);
+        }
+    }
+
+    pub fn exec(self: *Self, c: *Context, w: anytype, stm: *const Stmt) Error!void {
         switch (stm.*) {
             .expression => |e| {
                 _ = try self.eval(c, e);
@@ -183,12 +200,17 @@ pub const Interpreter = struct {
                     val = try self.eval(c, ini);
                 }
 
-                try self.environment.define(v.name.lexeme, val);
+                try self.env.define(v.name.lexeme, val);
+            },
+            .block => |stms| {
+                var env = Environment.init(self.allocator, self.env);
+                defer env.deinit();
+                try self.execBlock(c, w, stms, &env);
             },
         }
     }
 
-    pub fn stringify(w: anytype, val: Value) !void {
+    pub fn stringify(w: anytype, val: Value) Error!void {
         const min_i64 = std.math.minInt(i64);
         const max_i64 = std.math.maxInt(i64);
         switch (val) {
@@ -223,7 +245,9 @@ test "interpreter" {
     const Scanner = scanner.Scanner;
     const Parser = parser.Parser;
 
-    var s = try Scanner.init(std.testing.allocator, "(1 + 2 * 3 - 4);");
+    // const src = "var a = 1; var b = 2; print a + b; { var a = 5; print a; } print a;";
+    const src = "var a = \"foo\"; { var a = \"bar\"; } ";
+    var s = try Scanner.init(std.testing.allocator, src);
     defer s.deinit();
     var tokens = try s.scanTokens();
     var p = Parser.init(std.testing.allocator, tokens);
@@ -231,7 +255,7 @@ test "interpreter" {
     var statements = try p.parse();
 
     // var ctx: Context = Context.init();
-    var int = Interpreter.init(std.testing.allocator);
+    var int = try Interpreter.init(std.testing.allocator);
     defer int.deinit();
     var w = std.io.getStdErr().writer();
     try int.interpret(w, statements.items);

@@ -22,7 +22,7 @@ pub fn main() !u8 {
     //     _ = std.testing.allocator_instance.deinit();
     // }
     const args = std.os.argv[1..std.os.argv.len];
-    var m = Main.init();
+    var m = try Main.init();
     defer m.deinit();
     if (args.len > 1) {
         std.log.err("Usage: jlox [script]", .{});
@@ -41,9 +41,9 @@ const Main = struct {
 
     interpreter: Interpreter,
 
-    fn init() Self {
+    fn init() !Self {
         return Self{
-            .interpreter = Interpreter.init(allocator),
+            .interpreter = try Interpreter.init(allocator),
         };
     }
 

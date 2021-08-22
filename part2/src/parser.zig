@@ -93,6 +93,9 @@ pub const Parser = struct {
         if (self.match(&.{TT.PRINT})) {
             return self.printStatement();
         }
+        if (self.match(&.{TT.LEFT_BRACE})) {
+            return Stmt{ .block = try self.block() };
+        }
         return self.expressionStatement();
     }
 
@@ -106,6 +109,17 @@ pub const Parser = struct {
         var value = try self.expression();
         _ = try self.consume(TT.SEMICOLON, "Expect ';' after expression.");
         return Stmt{ .expression = value };
+    }
+
+    fn block(self: *Self) Error!ArrayList(Stmt) {
+        var statements = ArrayList(Stmt).init(&self.arena.allocator);
+
+        while (!self.check(TT.RIGHT_BRACE) and !self.isAtEnd()) {
+            try statements.append(try self.declaration());
+        }
+
+        _ = try self.consume(TT.RIGHT_BRACE, "Expect '}' after block.");
+        return statements;
     }
 
     fn expression(self: *Self) !*Expr {
