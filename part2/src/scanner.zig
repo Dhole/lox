@@ -223,8 +223,7 @@ pub const Scanner = struct {
 };
 
 test "scanner" {
-    var gpa = std.heap.GeneralPurposeAllocator(.{}){};
-    var scanner = try Scanner.init(&gpa.allocator, "({});");
+    var scanner = try Scanner.init(std.testing.allocator, "({});");
     defer scanner.deinit();
     _ = try scanner.scanTokens();
 }

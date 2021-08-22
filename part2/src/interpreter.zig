@@ -19,11 +19,12 @@ const Value = expr.Value;
 const ValueTag = expr.ValueTag;
 const Unary = expr.Unary;
 const Variable = expr.Variable;
+const Assign = expr.Assign;
 const Binary = expr.Binary;
 const Stmt = stmt.Stmt;
 const Environment = environment.Environment;
 
-const Error = error{RuntimeError};
+const Error = error{ RuntimeError, OutOfMemory };
 
 pub const Interpreter = struct {
     const Self = @This();
@@ -96,6 +97,12 @@ pub const Interpreter = struct {
         return self.environment.get(c, exp.name);
     }
 
+    fn evalAssign(self: *Self, c: *Context, exp: *const Assign) Error!Value {
+        const val = try self.eval(c, exp.value);
+        try self.environment.assign(c, exp.name, val);
+        return val;
+    }
+
     fn evalBinary(self: *Self, c: *Context, exp: *const Binary) Error!Value {
         const left = try self.eval(c, exp.left);
         const right = try self.eval(c, exp.right);
@@ -156,6 +163,7 @@ pub const Interpreter = struct {
             .literal => |*e| e.value,
             .unary => |*e| try self.evalUnary(c, e),
             .variable => |*e| try self.evalVar(c, e),
+            .assign => |*e| try self.evalAssign(c, e),
         };
     }
 
@@ -215,16 +223,15 @@ test "interpreter" {
     const Scanner = scanner.Scanner;
     const Parser = parser.Parser;
 
-    var gpa = std.heap.GeneralPurposeAllocator(.{}){};
-    var s = try Scanner.init(&gpa.allocator, "(1 + 2 * 3 - 4);");
+    var s = try Scanner.init(std.testing.allocator, "(1 + 2 * 3 - 4);");
     defer s.deinit();
     var tokens = try s.scanTokens();
-    var p = Parser.init(&gpa.allocator, tokens);
+    var p = Parser.init(std.testing.allocator, tokens);
     defer p.deinit();
     var statements = try p.parse();
 
     // var ctx: Context = Context.init();
-    var int = Interpreter.init(&gpa.allocator);
+    var int = Interpreter.init(std.testing.allocator);
     defer int.deinit();
     var w = std.io.getStdErr().writer();
     try int.interpret(w, statements.items);

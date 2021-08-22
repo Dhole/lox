@@ -44,6 +44,16 @@ pub const Environment = struct {
         try self.values.put(try self.allocator.dupe(u8, name), try value.clone(self.allocator));
     }
 
+    pub fn assign(self: *Self, c: *Context, name: Token, value: Value) !void {
+        if (self.values.getEntry(name.lexeme)) |entry| {
+            entry.value_ptr.free(self.allocator);
+            entry.value_ptr.* = try value.clone(self.allocator);
+        } else {
+            c.err = .{ .tok = name, .msg = "Undefined variable." };
+            return error.RuntimeError;
+        }
+    }
+
     pub fn get(self: *Self, c: *Context, name: Token) !Value {
         if (self.values.get(name.lexeme)) |val| {
             return val;
@@ -55,8 +65,7 @@ pub const Environment = struct {
 };
 
 test "environment" {
-    var gpa = std.heap.GeneralPurposeAllocator(.{}){};
-    var env = Environment.init(&gpa.allocator);
+    var env = Environment.init(std.testing.allocator);
     defer env.deinit();
     var ctx: Context = Context.init();
 

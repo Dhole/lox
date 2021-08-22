@@ -14,8 +14,13 @@ const Interpreter = interpreter.Interpreter;
 const MAX_FILE_SIZE = 0x1000000;
 
 var gpa = std.heap.GeneralPurposeAllocator(.{}){};
+var allocator = &gpa.allocator;
+// var allocator = std.testing.allocator;
 
 pub fn main() !u8 {
+    // defer {
+    //     _ = std.testing.allocator_instance.deinit();
+    // }
     const args = std.os.argv[1..std.os.argv.len];
     var m = Main.init();
     defer m.deinit();
@@ -38,7 +43,7 @@ const Main = struct {
 
     fn init() Self {
         return Self{
-            .interpreter = Interpreter.init(&gpa.allocator),
+            .interpreter = Interpreter.init(allocator),
         };
     }
 
@@ -50,8 +55,8 @@ const Main = struct {
         std.log.info("path: {s}", .{path});
 
         var path_file = try std.fs.cwd().openFile(path, .{ .read = true });
-        const bytes = try path_file.readToEndAlloc(&gpa.allocator, MAX_FILE_SIZE);
-        defer gpa.allocator.free(bytes);
+        const bytes = try path_file.readToEndAlloc(allocator, MAX_FILE_SIZE);
+        defer allocator.free(bytes);
 
         try self.run(bytes);
 
@@ -85,11 +90,11 @@ const Main = struct {
 
     fn run(self: *Self, bytes: []u8) !void {
         // std.log.info("{any}", .{bytes});
-        var s = try scanner.Scanner.init(&gpa.allocator, bytes);
+        var s = try scanner.Scanner.init(allocator, bytes);
         defer s.deinit();
         const tokens = try s.scanTokens();
 
-        var p = Parser.init(&gpa.allocator, tokens);
+        var p = Parser.init(allocator, tokens);
         defer p.deinit();
 
         var statements = p.parse() catch |e| {

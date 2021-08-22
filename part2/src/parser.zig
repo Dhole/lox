@@ -109,7 +109,7 @@ pub const Parser = struct {
     }
 
     fn expression(self: *Self) !*Expr {
-        return self.equality();
+        return self.assignment();
     }
 
     fn binLeftAssoc(self: *Self, operandFn: fn (*Self) Error!*Expr, tokens: []const TT) !*Expr {
@@ -123,6 +123,27 @@ pub const Parser = struct {
             exp = exp1;
         }
 
+        return exp;
+    }
+
+    fn assignment(self: *Self) Error!*Expr {
+        var exp = try self.equality();
+
+        if (self.match(&.{TT.EQUAL})) {
+            const equals = self.previous();
+            const value = try self.assignment();
+            switch (exp.*) {
+                .variable => |v| {
+                    const name = v.name;
+                    var exp1 = try self.arena.allocator.create(Expr);
+                    exp1.* = .{ .assign = .{ .name = name, .value = value } };
+                    exp = exp1;
+                },
+                else => {
+                    return err(equals, "Invalid assignment target.");
+                },
+            }
+        }
         return exp;
     }
 
@@ -284,11 +305,10 @@ test "parser" {
     const scanner = @import("scanner.zig");
     const Scanner = scanner.Scanner;
 
-    var gpa = std.heap.GeneralPurposeAllocator(.{}){};
-    var s = try Scanner.init(&gpa.allocator, "(1 + 2 * 3) <= 4 * 5 - 6; var foo = 1 + 2;");
+    var s = try Scanner.init(std.testing.allocator, "(1 + 2 * 3) <= 4 * 5 - 6; var foo = 1 + 2;");
     defer s.deinit();
     var tokens = try s.scanTokens();
-    var parser = Parser.init(&gpa.allocator, tokens);
+    var parser = Parser.init(std.testing.allocator, tokens);
     defer parser.deinit();
     // var exp: *Expr = undefined;
     // if (parser.parse()) |e| {

@@ -63,12 +63,18 @@ pub const Variable = struct {
     name: Token,
 };
 
+pub const Assign = struct {
+    name: Token,
+    value: *const Expr,
+};
+
 pub const Expr = union(enum) {
     binary: Binary,
     grouping: Grouping,
     literal: Literal,
     unary: Unary,
     variable: Variable,
+    assign: Assign,
 };
 
 fn parenthesize(w: anytype, name: []const u8, exps: []const *const Expr) anyerror!void {
@@ -94,6 +100,7 @@ pub fn printAst(w: anytype, exp: *const Expr) !void {
         },
         .unary => |*e| try parenthesize(w, e.operator.lexeme, &.{e.right}),
         .variable => |*e| try w.print("var {s}", .{e.name}),
+        .assign => @panic("TODO"),
     }
 }
 
