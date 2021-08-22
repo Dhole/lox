@@ -38,7 +38,7 @@ const Main = struct {
 
     fn init() Self {
         return Self{
-            .interpreter = Interpreter.init(),
+            .interpreter = Interpreter.init(&gpa.allocator),
         };
     }
 

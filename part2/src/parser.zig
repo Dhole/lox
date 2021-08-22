@@ -16,6 +16,7 @@ const Literal = expr.Literal;
 const Unary = expr.Unary;
 const Expr = expr.Expr;
 const Stmt = stmt.Stmt;
+const Var = stmt.Var;
 
 pub const Parser = struct {
     const Self = @This();
@@ -42,10 +43,51 @@ pub const Parser = struct {
     pub fn parse(self: *Self) !ArrayList(Stmt) {
         var statements = ArrayList(Stmt).init(&self.arena.allocator);
         while (!self.isAtEnd()) {
-            try statements.append(try self.statement());
+            try statements.append(try self.declaration());
         }
         return statements;
     }
+
+    fn declaration(self: *Self) !Stmt {
+        return blk: {
+            if (self.match(&.{TT.VAR})) {
+                break :blk self.varDeclaration();
+            }
+            break :blk self.statement();
+        } catch |e| {
+            switch (e) {
+                error.ParseError => {
+                    self.synchronize();
+                    return e;
+                },
+                else => return e,
+            }
+        };
+    }
+
+    fn varDeclaration(self: *Self) !Stmt {
+        const name = try self.consume(TT.IDENTIFIER, "Expect variable name.");
+
+        var initializer: ?*Expr = null;
+        if (self.match(&.{TT.EQUAL})) {
+            initializer = try self.expression();
+        }
+
+        _ = try self.consume(TT.SEMICOLON, "Expect ';' after variable declaration.");
+        return Stmt{ .varDecl = Var{ .name = name, .initializer = initializer } };
+    }
+
+    //  private Stmt varDeclaration() {
+    //    Token name = consume(IDENTIFIER, "Expect variable name.");
+    //
+    //    Expr initializer = null;
+    //    if (match(EQUAL)) {
+    //      initializer = expression();
+    //    }
+    //
+    //    consume(SEMICOLON, "Expect ';' after variable declaration.");
+    //    return new Stmt.Var(name, initializer);
+    //  }
 
     fn statement(self: *Self) !Stmt {
         if (self.match(&.{TT.PRINT})) {
@@ -151,6 +193,10 @@ pub const Parser = struct {
                 unreachable;
             }
         }
+        if (self.match(&.{TT.IDENTIFIER})) {
+            exp.* = .{ .variable = .{ .name = self.previous() } };
+            return exp;
+        }
         if (self.match(&.{TT.LEFT_PAREN})) {
             var exp0 = try self.expression();
             _ = try self.consume(TT.RIGHT_PAREN, "Expect ')' after expression.");
@@ -229,7 +275,7 @@ pub const Parser = struct {
                 else => {},
             }
 
-            _ = advance();
+            _ = self.advance();
         }
     }
 };
@@ -239,7 +285,7 @@ test "parser" {
     const Scanner = scanner.Scanner;
 
     var gpa = std.heap.GeneralPurposeAllocator(.{}){};
-    var s = try Scanner.init(&gpa.allocator, "(1 + 2 * 3) <= 4 * 5 - 6;");
+    var s = try Scanner.init(&gpa.allocator, "(1 + 2 * 3) <= 4 * 5 - 6; var foo = 1 + 2;");
     defer s.deinit();
     var tokens = try s.scanTokens();
     var parser = Parser.init(&gpa.allocator, tokens);

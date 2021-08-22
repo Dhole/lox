@@ -1,12 +1,16 @@
 const std = @import("std");
 
+const Allocator = std.mem.Allocator;
+
 const expr = @import("expr.zig");
 const stmt = @import("stmt.zig");
 const token = @import("token.zig");
 const helpers = @import("helpers.zig");
+const environment = @import("environment.zig");
 
 const RuntimeError = helpers.RuntimeError;
 const reportRuntimeError = helpers.reportRuntimeError;
+const Context = helpers.Context;
 const Token = token.Token;
 const TT = token.TokenType;
 const Literal = expr.Literal;
@@ -14,31 +18,26 @@ const Expr = expr.Expr;
 const Value = expr.Value;
 const ValueTag = expr.ValueTag;
 const Unary = expr.Unary;
+const Variable = expr.Variable;
 const Binary = expr.Binary;
 const Stmt = stmt.Stmt;
+const Environment = environment.Environment;
 
 const Error = error{RuntimeError};
-
-pub const Context = struct {
-    const Self = @This();
-    err: ?RuntimeError,
-
-    pub fn init() Self {
-        return Self{
-            .err = null,
-        };
-    }
-};
 
 pub const Interpreter = struct {
     const Self = @This();
 
-    pub fn init() Self {
-        return Self{};
+    environment: Environment,
+
+    pub fn init(allocator: *Allocator) Self {
+        return Self{
+            .environment = Environment.init(allocator),
+        };
     }
 
     pub fn deinit(self: *Self) void {
-        _ = self;
+        self.environment.deinit();
         return;
     }
 
@@ -91,6 +90,10 @@ pub const Interpreter = struct {
             },
             else => unreachable,
         }
+    }
+
+    fn evalVar(self: *Self, c: *Context, exp: *const Variable) Error!Value {
+        return self.environment.get(c, exp.name);
     }
 
     fn evalBinary(self: *Self, c: *Context, exp: *const Binary) Error!Value {
@@ -152,6 +155,7 @@ pub const Interpreter = struct {
             .grouping => |*e| try self.eval(c, e.expression),
             .literal => |*e| e.value,
             .unary => |*e| try self.evalUnary(c, e),
+            .variable => |*e| try self.evalVar(c, e),
         };
     }
 
@@ -164,6 +168,14 @@ pub const Interpreter = struct {
                 const val = try self.eval(c, e);
                 try stringify(w, val);
                 try w.print("\n", .{});
+            },
+            .varDecl => |*v| {
+                var val: Value = Value{ .nil = {} };
+                if (v.initializer) |ini| {
+                    val = try self.eval(c, ini);
+                }
+
+                try self.environment.define(v.name.lexeme, val);
             },
         }
     }
@@ -212,7 +224,7 @@ test "interpreter" {
     var statements = try p.parse();
 
     // var ctx: Context = Context.init();
-    var int = Interpreter.init();
+    var int = Interpreter.init(&gpa.allocator);
     defer int.deinit();
     var w = std.io.getStdErr().writer();
     try int.interpret(w, statements.items);

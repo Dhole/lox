@@ -54,3 +54,14 @@ pub fn reportRuntimeError(e: RuntimeError) void {
     std.log.err("[line {d}] {s}", .{ e.tok.line, e.msg });
     hadRuntimeError = true;
 }
+
+pub const Context = struct {
+    const Self = @This();
+    err: ?RuntimeError,
+
+    pub fn init() Self {
+        return Self{
+            .err = null,
+        };
+    }
+};

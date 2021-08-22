@@ -1,3 +1,7 @@
+const std = @import("std");
+
+const Allocator = std.mem.Allocator;
+
 const token = @import("token.zig");
 
 const Token = token.Token;
@@ -26,6 +30,23 @@ pub const Value = union(ValueTag) {
     number: f64,
     string: []const u8,
     nil,
+
+    pub fn clone(self: *const Value, allocator: *Allocator) !Value {
+        return switch (self.*) {
+            .string => |s| blk: {
+                var cpy = try allocator.dupe(u8, s);
+                break :blk Value{ .string = cpy };
+            },
+            else => self.*,
+        };
+    }
+
+    pub fn free(self: *Value, allocator: *Allocator) void {
+        switch (self.*) {
+            .string => |s| allocator.free(s),
+            else => {},
+        }
+    }
 };
 
 pub const Literal = struct {
@@ -38,11 +59,16 @@ pub const Unary = struct {
     right: *const Expr,
 };
 
+pub const Variable = struct {
+    name: Token,
+};
+
 pub const Expr = union(enum) {
     binary: Binary,
     grouping: Grouping,
     literal: Literal,
     unary: Unary,
+    variable: Variable,
 };
 
 fn parenthesize(w: anytype, name: []const u8, exps: []const *const Expr) anyerror!void {
@@ -67,10 +93,9 @@ pub fn printAst(w: anytype, exp: *const Expr) !void {
             .nil => try w.print("nil", .{}),
         },
         .unary => |*e| try parenthesize(w, e.operator.lexeme, &.{e.right}),
+        .variable => |*e| try w.print("var {s}", .{e.name}),
     }
 }
-
-const std = @import("std");
 
 test "expr" {
     var e = Expr{ .binary = .{
