@@ -22,6 +22,7 @@ const Unary = expr.Unary;
 const Variable = expr.Variable;
 const Assign = expr.Assign;
 const Binary = expr.Binary;
+const Logical = expr.Logical;
 const Stmt = stmt.Stmt;
 const Environment = environment.Environment;
 
@@ -109,6 +110,21 @@ pub const Interpreter = struct {
         return val;
     }
 
+    fn evalLogical(self: *Self, c: *Context, exp: *const Logical) Error!Value {
+        const left = try self.eval(c, exp.left);
+
+        if (exp.operator.type == TT.OR) {
+            if (isTruthy(left)) {
+                return left;
+            }
+        } else {
+            if (!isTruthy(left)) {
+                return left;
+            }
+        }
+        return try self.eval(c, exp.right);
+    }
+
     fn evalBinary(self: *Self, c: *Context, exp: *const Binary) Error!Value {
         const left = try self.eval(c, exp.left);
         const right = try self.eval(c, exp.right);
@@ -165,6 +181,7 @@ pub const Interpreter = struct {
     pub fn eval(self: *Self, c: *Context, exp: *const Expr) Error!Value {
         return switch (exp.*) {
             .binary => |*e| try self.evalBinary(c, e),
+            .logical => |*e| try self.evalLogical(c, e),
             .grouping => |*e| try self.eval(c, e.expression),
             .literal => |*e| e.value,
             .unary => |*e| try self.evalUnary(c, e),
@@ -206,6 +223,15 @@ pub const Interpreter = struct {
                 var env = Environment.init(self.allocator, self.env);
                 defer env.deinit();
                 try self.execBlock(c, w, stms, &env);
+            },
+            .ifStmt => |ifStmt| {
+                if (isTruthy(try self.eval(c, ifStmt.condition))) {
+                    try self.exec(c, w, ifStmt.thenBranch);
+                } else {
+                    if (ifStmt.elseBranch) |elseBranch| {
+                        try self.exec(c, w, elseBranch);
+                    }
+                }
             },
         }
     }

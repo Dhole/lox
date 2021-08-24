@@ -54,6 +54,12 @@ pub const Literal = struct {
     value: Value,
 };
 
+pub const Logical = struct {
+    left: *const Expr,
+    operator: Token,
+    right: *const Expr,
+};
+
 pub const Unary = struct {
     operator: Token,
     right: *const Expr,
@@ -72,6 +78,7 @@ pub const Expr = union(enum) {
     binary: Binary,
     grouping: Grouping,
     literal: Literal,
+    logical: Logical,
     unary: Unary,
     variable: Variable,
     assign: Assign,
@@ -89,6 +96,9 @@ fn parenthesize(w: anytype, name: []const u8, exps: []const *const Expr) anyerro
 pub fn printAst(w: anytype, exp: *const Expr) !void {
     switch (exp.*) {
         .binary => |*e| {
+            try parenthesize(w, e.operator.lexeme, &.{ e.left, e.right });
+        },
+        .logical => |*e| {
             try parenthesize(w, e.operator.lexeme, &.{ e.left, e.right });
         },
         .grouping => |*e| try parenthesize(w, "group", &.{e.expression}),

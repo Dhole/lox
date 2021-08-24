@@ -16,6 +16,7 @@ const Literal = expr.Literal;
 const Unary = expr.Unary;
 const Expr = expr.Expr;
 const Stmt = stmt.Stmt;
+const IfStmt = stmt.IfStmt;
 const Var = stmt.Var;
 
 pub const Parser = struct {
@@ -89,7 +90,10 @@ pub const Parser = struct {
     //    return new Stmt.Var(name, initializer);
     //  }
 
-    fn statement(self: *Self) !Stmt {
+    fn statement(self: *Self) Error!Stmt {
+        if (self.match(&.{TT.IF})) {
+            return self.ifStatement();
+        }
         if (self.match(&.{TT.PRINT})) {
             return self.printStatement();
         }
@@ -97,6 +101,23 @@ pub const Parser = struct {
             return Stmt{ .block = try self.block() };
         }
         return self.expressionStatement();
+    }
+
+    fn ifStatement(self: *Self) !Stmt {
+        _ = try self.consume(TT.LEFT_PAREN, "Expect '(' after 'if'.");
+        var condition = try self.expression();
+        _ = try self.consume(TT.RIGHT_PAREN, "Expect ')' after if condition.");
+
+        var thenBranch = try self.arena.allocator.create(Stmt);
+        thenBranch.* = try self.statement();
+        var elseBranch: ?*Stmt = null;
+        if (self.match(&.{TT.ELSE})) {
+            var s = try self.arena.allocator.create(Stmt);
+            s.* = try self.statement();
+            elseBranch = s;
+        }
+
+        return Stmt{ .ifStmt = IfStmt{ .condition = condition, .thenBranch = thenBranch, .elseBranch = elseBranch } };
     }
 
     fn printStatement(self: *Self) !Stmt {
@@ -126,22 +147,8 @@ pub const Parser = struct {
         return self.assignment();
     }
 
-    fn binLeftAssoc(self: *Self, operandFn: fn (*Self) Error!*Expr, tokens: []const TT) !*Expr {
-        var exp = try operandFn(self);
-
-        while (self.match(tokens)) {
-            var operator = self.previous();
-            var right = try operandFn(self);
-            var exp1 = try self.arena.allocator.create(Expr);
-            exp1.* = .{ .binary = .{ .left = exp, .operator = operator, .right = right } };
-            exp = exp1;
-        }
-
-        return exp;
-    }
-
     fn assignment(self: *Self) Error!*Expr {
-        var exp = try self.equality();
+        var exp = try self.orExpr();
 
         if (self.match(&.{TT.EQUAL})) {
             const equals = self.previous();
@@ -158,6 +165,48 @@ pub const Parser = struct {
                 },
             }
         }
+        return exp;
+    }
+
+    fn orExpr(self: *Self) !*Expr {
+        var exp = try self.andExpr();
+
+        while (self.match(&.{TT.OR})) {
+            var operator = self.previous();
+            var right = try self.andExpr();
+            var exp1 = try self.arena.allocator.create(Expr);
+            exp1.* = .{ .logical = .{ .left = exp, .operator = operator, .right = right } };
+            exp = exp1;
+        }
+
+        return exp;
+    }
+
+    fn andExpr(self: *Self) !*Expr {
+        var exp = try self.equality();
+
+        while (self.match(&.{TT.AND})) {
+            var operator = self.previous();
+            var right = try self.equality();
+            var exp1 = try self.arena.allocator.create(Expr);
+            exp1.* = .{ .logical = .{ .left = exp, .operator = operator, .right = right } };
+            exp = exp1;
+        }
+
+        return exp;
+    }
+
+    fn binLeftAssoc(self: *Self, operandFn: fn (*Self) Error!*Expr, tokens: []const TT) !*Expr {
+        var exp = try operandFn(self);
+
+        while (self.match(tokens)) {
+            var operator = self.previous();
+            var right = try operandFn(self);
+            var exp1 = try self.arena.allocator.create(Expr);
+            exp1.* = .{ .binary = .{ .left = exp, .operator = operator, .right = right } };
+            exp = exp1;
+        }
+
         return exp;
     }
 

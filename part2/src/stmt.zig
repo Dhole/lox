@@ -13,9 +13,16 @@ pub const Var = struct {
     initializer: ?*Expr,
 };
 
+pub const IfStmt = struct {
+    condition: *Expr,
+    thenBranch: *Stmt,
+    elseBranch: ?*Stmt,
+};
+
 pub const Stmt = union(enum) {
     block: ArrayList(Stmt),
     expression: *Expr,
+    ifStmt: IfStmt,
     print: *Expr,
     varDecl: Var,
 };
