@@ -16,7 +16,6 @@ const Literal = expr.Literal;
 const Unary = expr.Unary;
 const Expr = expr.Expr;
 const Stmt = stmt.Stmt;
-const IfStmt = stmt.IfStmt;
 const Var = stmt.Var;
 
 pub const Parser = struct {
@@ -97,6 +96,12 @@ pub const Parser = struct {
         if (self.match(&.{TT.PRINT})) {
             return self.printStatement();
         }
+        if (self.match(&.{TT.WHILE})) {
+            return self.whileStatement();
+        }
+        if (self.match(&.{TT.FOR})) {
+            return self.forStatement();
+        }
         if (self.match(&.{TT.LEFT_BRACE})) {
             return Stmt{ .block = try self.block() };
         }
@@ -117,7 +122,76 @@ pub const Parser = struct {
             elseBranch = s;
         }
 
-        return Stmt{ .ifStmt = IfStmt{ .condition = condition, .thenBranch = thenBranch, .elseBranch = elseBranch } };
+        return Stmt{ .ifStmt = .{ .condition = condition, .thenBranch = thenBranch, .elseBranch = elseBranch } };
+    }
+
+    fn whileStatement(self: *Self) !Stmt {
+        _ = try self.consume(TT.LEFT_PAREN, "Expect '(' after 'while'.");
+        var condition = try self.expression();
+        _ = try self.consume(TT.RIGHT_PAREN, "Expect ')' after condition.");
+        var body = try self.arena.allocator.create(Stmt);
+        body.* = try self.statement();
+
+        return Stmt{ .whileStmt = .{ .condition = condition, .body = body } };
+    }
+
+    fn forStatement(self: *Self) !Stmt {
+        _ = try self.consume(TT.LEFT_PAREN, "Expect '(' after 'while'.");
+
+        var initializer: ?*Stmt = undefined;
+        if (self.match(&.{TT.SEMICOLON})) {
+            initializer = null;
+        } else if (self.match(&.{TT.VAR})) {
+            var _initializer = try self.arena.allocator.create(Stmt);
+            _initializer.* = try self.varDeclaration();
+            initializer = _initializer;
+        } else {
+            var _initializer = try self.arena.allocator.create(Stmt);
+            _initializer.* = try self.expressionStatement();
+            initializer = _initializer;
+        }
+
+        var condition: ?*Expr = null;
+        if (!self.check(TT.SEMICOLON)) {
+            condition = try self.expression();
+        }
+        _ = try self.consume(TT.SEMICOLON, "Expect ';' after loop condition.");
+
+        var increment: ?*Expr = null;
+        if (!self.check(TT.RIGHT_PAREN)) {
+            increment = try self.expression();
+        }
+        _ = try self.consume(TT.RIGHT_PAREN, "Expect ')' after for clauses.");
+
+        var body = try self.statement();
+
+        if (increment) |inc| {
+            var statements = ArrayList(Stmt).init(&self.arena.allocator);
+            try statements.append(body);
+            try statements.append(Stmt{ .expression = inc });
+            body = Stmt{ .block = statements };
+        }
+
+        var cond: *Expr = undefined;
+        if (condition) |c| {
+            cond = c;
+        } else {
+            var c = try self.arena.allocator.create(Expr);
+            c.* = Expr{ .literal = .{ .value = .{ .boolean = true } } };
+            cond = c;
+        }
+        var _body = try self.arena.allocator.create(Stmt);
+        _body.* = body;
+        body = Stmt{ .whileStmt = .{ .condition = cond, .body = _body } };
+
+        if (initializer) |ini| {
+            var statements = ArrayList(Stmt).init(&self.arena.allocator);
+            try statements.append(ini.*);
+            try statements.append(body);
+            body = Stmt{ .block = statements };
+        }
+
+        return body;
     }
 
     fn printStatement(self: *Self) !Stmt {

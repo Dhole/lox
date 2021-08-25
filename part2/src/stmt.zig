@@ -19,10 +19,16 @@ pub const IfStmt = struct {
     elseBranch: ?*Stmt,
 };
 
+pub const WhileStmt = struct {
+    condition: *Expr,
+    body: *Stmt,
+};
+
 pub const Stmt = union(enum) {
     block: ArrayList(Stmt),
     expression: *Expr,
     ifStmt: IfStmt,
     print: *Expr,
     varDecl: Var,
+    whileStmt: WhileStmt,
 };

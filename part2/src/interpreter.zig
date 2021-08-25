@@ -233,20 +233,19 @@ pub const Interpreter = struct {
                     }
                 }
             },
+            .whileStmt => |whileStmt| {
+                while (isTruthy(try self.eval(c, whileStmt.condition))) {
+                    try self.exec(c, w, whileStmt.body);
+                }
+            },
         }
     }
 
     pub fn stringify(w: anytype, val: Value) Error!void {
-        const min_i64 = std.math.minInt(i64);
-        const max_i64 = std.math.maxInt(i64);
         switch (val) {
             .boolean => |v| try w.print("{s}", .{v}),
             .number => |v| {
-                if (min_i64 <= v and v <= max_i64 and (v - @intToFloat(f64, @floatToInt(i64, v))) == 0.0) {
-                    try w.print("{d:.0}", .{v});
-                } else {
-                    try w.print("{d}", .{v});
-                }
+                try w.print("{d}", .{v});
             },
             .string => |v| try w.print("{s}", .{v}),
             .nil => try w.print("nil", .{}),
