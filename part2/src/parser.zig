@@ -5,7 +5,6 @@ const Allocator = std.mem.Allocator;
 
 const token = @import("token.zig");
 const expr = @import("expr.zig");
-const stmt = @import("stmt.zig");
 const helpers = @import("helpers.zig");
 
 const Token = token.Token;
@@ -15,8 +14,8 @@ const Grouping = expr.Grouping;
 const Literal = expr.Literal;
 const Unary = expr.Unary;
 const Expr = expr.Expr;
-const Stmt = stmt.Stmt;
-const Var = stmt.Var;
+const Stmt = expr.Stmt;
+const Var = expr.Var;
 
 pub const Parser = struct {
     const Self = @This();
@@ -50,7 +49,9 @@ pub const Parser = struct {
 
     fn declaration(self: *Self) !Stmt {
         return blk: {
-            if (self.match(&.{TT.VAR})) {
+            if (self.match(&.{TT.FUN})) {
+                break :blk self.function(FunctionKind.function);
+            } else if (self.match(&.{TT.VAR})) {
                 break :blk self.varDeclaration();
             }
             break :blk self.statement();
@@ -75,6 +76,43 @@ pub const Parser = struct {
 
         _ = try self.consume(TT.SEMICOLON, "Expect ';' after variable declaration.");
         return Stmt{ .varDecl = Var{ .name = name, .initializer = initializer } };
+    }
+
+    const FunctionKind = enum {
+        function,
+        method,
+    };
+
+    fn function(self: *Self, kind: FunctionKind) !Stmt {
+        const name = try self.consume(TT.IDENTIFIER, switch (kind) {
+            .function => "Expect function name.",
+            .method => "Expect method name.",
+        });
+        _ = try self.consume(TT.LEFT_PAREN, switch (kind) {
+            .function => "Expect '(' after function name.",
+            .method => "Expect '(' after method name.",
+        });
+
+        var parameters = ArrayList(Token).init(&self.arena.allocator);
+        if (!self.check(TT.RIGHT_PAREN)) {
+            while (true) {
+                if (parameters.items.len >= 255) {
+                    return err(self.peek(), "Can't have more than 255 parameters.");
+                }
+                try parameters.append(try self.consume(TT.IDENTIFIER, "Expect parameter name."));
+                if (!self.match(&.{TT.COMMA})) {
+                    break;
+                }
+            }
+        }
+        _ = try self.consume(TT.RIGHT_PAREN, "Expect ')' after parameters.");
+
+        _ = try self.consume(TT.LEFT_BRACE, switch (kind) {
+            .function => "Expect '{' before function body.",
+            .method => "Expect '{' before method body.",
+        });
+        const body = try self.block();
+        return Stmt{ .function = .{ .name = name, .params = parameters, .body = body } };
     }
 
     //  private Stmt varDeclaration() {
@@ -308,7 +346,42 @@ pub const Parser = struct {
             e.* = .{ .unary = .{ .operator = operator, .right = right } };
             return e;
         }
-        return self.primary();
+        return self.call();
+    }
+
+    fn call(self: *Self) Error!*Expr {
+        var exp = try self.primary();
+
+        while (true) {
+            if (self.match(&.{TT.LEFT_PAREN})) {
+                exp = try self.finishCall(exp);
+            } else {
+                break;
+            }
+        }
+
+        return exp;
+    }
+
+    fn finishCall(self: *Self, callee: *Expr) Error!*Expr {
+        var arguments = ArrayList(Expr).init(&self.arena.allocator);
+        if (!self.check(TT.RIGHT_PAREN)) {
+            while (true) {
+                if (arguments.items.len >= 255) {
+                    return err(self.peek(), "Can't have more than 255 arguments.");
+                }
+                try arguments.append((try self.expression()).*);
+                if (!self.match(&.{TT.COMMA})) {
+                    break;
+                }
+            }
+        }
+
+        var paren = try self.consume(TT.RIGHT_PAREN, "Expect ')' after arguments.");
+
+        var exp = try self.arena.allocator.create(Expr);
+        exp.* = Expr{ .call = .{ .callee = callee, .paren = paren, .arguments = arguments } };
+        return exp;
     }
 
     fn primary(self: *Self) Error!*Expr {
@@ -442,7 +515,8 @@ test "parser" {
     const scanner = @import("scanner.zig");
     const Scanner = scanner.Scanner;
 
-    var s = try Scanner.init(std.testing.allocator, "(1 + 2 * 3) <= 4 * 5 - 6; var foo = 1 + 2;");
+    // var s = try Scanner.init(std.testing.allocator, "(1 + 2 * 3) <= 4 * 5 - 6; var foo = 1 + 2;");
+    var s = try Scanner.init(std.testing.allocator, "foo(1, 2); bar(); fun foo(a) { 1 + 2; }");
     defer s.deinit();
     var tokens = try s.scanTokens();
     var parser = Parser.init(std.testing.allocator, tokens);

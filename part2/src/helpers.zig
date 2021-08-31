@@ -1,6 +1,7 @@
 const std = @import("std");
 
 const FmtOpts = std.fmt.FormatOptions;
+const bufPrint = std.fmt.bufPrint;
 
 const token = @import("token.zig");
 
@@ -40,12 +41,22 @@ pub fn report(line: u32, where: []const u8, msg: []const u8) void {
 pub const RuntimeError = struct {
     const Self = @This();
     tok: Token,
+    buf: [128]u8,
     msg: []const u8,
+
+    // pub fn init(tok: Token, comptime fmt: []const u8, args: anytype) !Self {
+    //     const msg = try bufPrint(c.err.buf, "Expected {d} arguments but got {d}.", .{ function_arity, arguments.len });
+    // }
 
     pub fn format(self: Self, comptime fmt: []const u8, opts: FmtOpts, w: anytype) !void {
         _ = opts;
         _ = fmt;
         try w.print("{{token:{s}, msg:{s}}}", .{ self.tok, self.msg });
+    }
+
+    pub fn set(self: *Self, tok: Token, msg: []const u8) void {
+        self.tok = tok;
+        self.msg = msg;
     }
 };
 
@@ -63,5 +74,13 @@ pub const Context = struct {
         return Self{
             .err = null,
         };
+    }
+
+    pub fn errSet(self: *Self, tok: Token, comptime fmt: []const u8, args: anytype) !void {
+        self.err = .{ .tok = undefined, .buf = undefined, .msg = undefined };
+        if (self.err) |*err| {
+            err.tok = tok;
+            err.msg = try bufPrint(&err.buf, fmt, args);
+        } else unreachable;
     }
 };

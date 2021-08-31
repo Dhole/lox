@@ -55,7 +55,7 @@ pub const Environment = struct {
             if (self.enclosing) |enclosing| {
                 return enclosing.assign(c, name, value);
             }
-            c.err = .{ .tok = name, .msg = "Undefined variable." };
+            try c.errSet(name, "Undefined variable.", .{});
             return error.RuntimeError;
         }
     }
@@ -67,7 +67,7 @@ pub const Environment = struct {
             if (self.enclosing) |enclosing| {
                 return enclosing.get(c, name);
             }
-            c.err = .{ .tok = name, .msg = "Undefined variable." };
+            try c.errSet(name, "Undefined variable.", .{});
             return error.RuntimeError;
         }
     }
