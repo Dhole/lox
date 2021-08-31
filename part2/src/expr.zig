@@ -4,12 +4,12 @@ const ArrayList = std.ArrayList;
 const Allocator = std.mem.Allocator;
 
 const token = @import("token.zig");
-// const interpreter = @import("interpreter.zig");
+const interpreter = @import("interpreter.zig");
 
 const Token = token.Token;
 const Lit = token.Token.Literal;
 const TT = token.TokenType;
-// const Interpreter = interpreter.Interpreter;
+const Interpreter = interpreter.Interpreter;
 
 pub const Binary = struct {
     left: *const Expr,
@@ -23,18 +23,22 @@ pub const Grouping = struct {
 
 pub const ValueTag = enum {
     loxFunc,
-    // nativeFunc,
+    nativeFunc,
     boolean,
     number,
     string,
     nil,
 };
 
-// pub const NativeFunc = struct {
-//     name: []const u8,
-//     arity: u32,
-//     call: fn (interpreter: *Interpreter, arguments: []Value, result: *Value) void,
+// pub const NativeFunc = enum {
+//     clock,
 // };
+
+pub const NativeFunc = struct {
+    // name: []const u8,
+    arity: u32,
+    call: fn (interpreter: *Interpreter, arguments: []Value, result: *Value) void,
+};
 
 pub const LoxFunc = struct {
     declaration: Function,
@@ -42,7 +46,7 @@ pub const LoxFunc = struct {
 
 pub const Value = union(ValueTag) {
     loxFunc: LoxFunc,
-    // nativeFunc: NativeFunc,
+    nativeFunc: NativeFunc,
     boolean: bool,
     number: f64,
     string: []const u8,
@@ -127,6 +131,7 @@ pub fn printAst(w: anytype, exp: *const Expr) !void {
         },
         .grouping => |*e| try parenthesize(w, "group", &.{e.expression}),
         .literal => |*e| switch (e.value) {
+            .nativeFunc => |v| try w.print("<native fun {s}>", .{v}),
             .loxFunc => |v| try w.print("<fun {s}>", .{v.declaration.name.lexeme}),
             .boolean => |v| try w.print("{s}", .{v}),
             .number => |v| try w.print("{d}", .{v}),

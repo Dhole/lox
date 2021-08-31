@@ -25,6 +25,8 @@ const Binary = expr.Binary;
 const Call = expr.Call;
 const Logical = expr.Logical;
 const Stmt = expr.Stmt;
+const NativeFunc = expr.NativeFunc;
+const LoxFunc = expr.LoxFunc;
 const Environment = environment.Environment;
 
 const Error = error{ RuntimeError, OutOfMemory } || std.os.WriteError || std.fmt.BufPrintError;
@@ -38,7 +40,7 @@ fn fnClock(interpreter: *Interpreter, arguments: []Value, result: *Value) void {
 pub const Interpreter = struct {
     const Self = @This();
 
-    w: anytype,
+    // w: anytype,
     allocator: *Allocator,
     globals: *Environment,
     env: *Environment,
@@ -46,7 +48,8 @@ pub const Interpreter = struct {
     pub fn init(allocator: *Allocator) !Self {
         var env = (try allocator.create(Environment));
         env.* = Environment.init(allocator, null);
-        // try env.define("clock", Value{ .nativeFunc = .{ .name = "clock", .arity = 0, .call = fnClock } });
+        std.debug.print("hello\n", .{});
+        try env.define("clock", Value{ .nativeFunc = .{ .arity = 0, .call = fnClock } });
         return Self{
             .allocator = allocator,
             .globals = env,
@@ -73,7 +76,8 @@ pub const Interpreter = struct {
             return false;
         }
         return switch (a) {
-            // .nativeFunc => |va| std.mem.eql(u8, va.name, b.nativeFunc.name),
+            .loxFunc => |va| std.mem.eql(u8, va.declaration.name.lexeme, b.loxFunc.declaration.name.lexeme),
+            .nativeFunc => |va| va.call == b.nativeFunc.call,
             .boolean => |va| va == b.boolean,
             .number => |va| va == b.number,
             .string => |va| std.mem.eql(u8, va, b.string),
@@ -97,8 +101,8 @@ pub const Interpreter = struct {
         return error.RuntimeError;
     }
 
-    fn evalUnary(self: *Self, c: *Context, exp: *const Unary) Error!Value {
-        const right = try self.eval(c, exp.right);
+    fn evalUnary(self: *Self, c: *Context, w: anytype, exp: *const Unary) Error!Value {
+        const right = try self.eval(c, w, exp.right);
 
         switch (exp.operator.type) {
             TT.MINUS => {
@@ -116,14 +120,14 @@ pub const Interpreter = struct {
         return self.env.get(c, exp.name);
     }
 
-    fn evalAssign(self: *Self, c: *Context, exp: *const Assign) Error!Value {
-        const val = try self.eval(c, exp.value);
+    fn evalAssign(self: *Self, c: *Context, w: anytype, exp: *const Assign) Error!Value {
+        const val = try self.eval(c, w, exp.value);
         try self.env.assign(c, exp.name, val);
         return val;
     }
 
-    fn evalLogical(self: *Self, c: *Context, exp: *const Logical) Error!Value {
-        const left = try self.eval(c, exp.left);
+    fn evalLogical(self: *Self, c: *Context, w: anytype, exp: *const Logical) Error!Value {
+        const left = try self.eval(c, w, exp.left);
 
         if (exp.operator.type == TT.OR) {
             if (isTruthy(left)) {
@@ -134,12 +138,12 @@ pub const Interpreter = struct {
                 return left;
             }
         }
-        return try self.eval(c, exp.right);
+        return try self.eval(c, w, exp.right);
     }
 
-    fn evalBinary(self: *Self, c: *Context, exp: *const Binary) Error!Value {
-        const left = try self.eval(c, exp.left);
-        const right = try self.eval(c, exp.right);
+    fn evalBinary(self: *Self, c: *Context, w: anytype, exp: *const Binary) Error!Value {
+        const left = try self.eval(c, w, exp.left);
+        const right = try self.eval(c, w, exp.right);
 
         switch (exp.operator.type) {
             TT.MINUS => {
@@ -190,15 +194,15 @@ pub const Interpreter = struct {
         }
     }
 
-    fn evalCall(self: *Self, c: *Context, exp: *const Call) Error!Value {
-        var callee = try self.eval(c, exp.callee);
+    fn evalCall(self: *Self, c: *Context, w: anytype, exp: *const Call) Error!Value {
+        var callee = try self.eval(c, w, exp.callee);
         var arguments = ArrayList(Value).init(self.allocator);
         defer arguments.deinit();
         for (exp.arguments.items) |*arg| {
-            try arguments.append(try self.eval(c, arg));
+            try arguments.append(try self.eval(c, w, arg));
         }
 
-        return self.call(c, exp.paren, callee, arguments.items);
+        return self.call(c, w, exp.paren, callee, arguments.items);
     }
 
     fn funcArity(callee: Value) u32 {
@@ -208,18 +212,18 @@ pub const Interpreter = struct {
         };
     }
 
-    fn loxCall(self: *Self, c: *Context, w: anytype, func: *LoxFunc, arguments: []Value, result: *Value) void {
+    fn loxCall(self: *Self, c: *Context, w: anytype, func: *const LoxFunc, arguments: []Value, result: *Value) !void {
         _ = result;
         var env = Environment.init(self.allocator, self.globals);
-        for (func.declaration.items) |*param| {
+        for (func.declaration.params.items) |*param, i| {
             try env.define(param.lexeme, arguments[i]);
         }
-        self.executeBlock(func.declaration.body);
         try self.execBlock(c, w, func.declaration.body, &env);
-        return null;
     }
 
     fn call(self: *Self, c: *Context, w: anytype, tok: Token, callee: Value, arguments: []Value) Error!Value {
+        _ = self;
+        _ = w;
         _ = c;
         const arity = funcArity(callee);
         if (arguments.len != arity) {
@@ -229,11 +233,11 @@ pub const Interpreter = struct {
         var result: Value = undefined;
         switch (callee) {
             .loxFunc => |*f| {
-                self.loxCall(c, f, w, arguments, &result);
+                try self.loxCall(c, w, f, arguments, &result);
             },
-            // .nativeFunc => |*f| {
-            //     f.call(self, arguments, &result);
-            // },
+            .nativeFunc => |*f| {
+                f.call(self, arguments, &result);
+            },
             else => {
                 try c.errSet(tok, "Can only call functions and classes.", .{});
                 return error.RuntimeError;
@@ -244,14 +248,14 @@ pub const Interpreter = struct {
 
     pub fn eval(self: *Self, c: *Context, w: anytype, exp: *const Expr) Error!Value {
         return switch (exp.*) {
-            .binary => |*e| try self.evalBinary(c, e),
+            .binary => |*e| try self.evalBinary(c, w, e),
             .call => |*e| try self.evalCall(c, w, e),
-            .logical => |*e| try self.evalLogical(c, e),
+            .logical => |*e| try self.evalLogical(c, w, e),
             .grouping => |*e| try self.eval(c, w, e.expression),
             .literal => |*e| e.value,
-            .unary => |*e| try self.evalUnary(c, e),
+            .unary => |*e| try self.evalUnary(c, w, e),
             .variable => |*e| try self.evalVar(c, e),
-            .assign => |*e| try self.evalAssign(c, e),
+            .assign => |*e| try self.evalAssign(c, w, e),
         };
     }
 
@@ -268,6 +272,10 @@ pub const Interpreter = struct {
 
     pub fn exec(self: *Self, c: *Context, w: anytype, stm: *const Stmt) Error!void {
         switch (stm.*) {
+            .function => |f| {
+                _ = f;
+                @panic("unimplemented");
+            },
             .expression => |e| {
                 _ = try self.eval(c, w, e);
             },
@@ -308,7 +316,8 @@ pub const Interpreter = struct {
 
     pub fn stringify(w: anytype, val: Value) Error!void {
         switch (val) {
-            // .nativeFunc => try w.print("<native fn>", .{}),
+            .loxFunc => |v| try w.print("<fn {s}>", .{v.declaration.name.lexeme}),
+            .nativeFunc => |v| try w.print("<native fn {s}>", .{v}),
             .boolean => |v| try w.print("{s}", .{v}),
             .number => |v| {
                 try w.print("{d}", .{v});
@@ -346,10 +355,10 @@ test "interpreter" {
     var statements = try p.parse();
     std.debug.print("{s}\n", .{statements});
 
-    // var int = try Interpreter.init(std.testing.allocator);
-    // defer int.deinit();
-    // var w = std.io.getStdErr().writer();
-    // try int.interpret(w, statements.items);
+    var int = try Interpreter.init(std.testing.allocator);
+    defer int.deinit();
+    var w = std.io.getStdErr().writer();
+    try int.interpret(w, statements.items);
 
     // for (statements.items) |*stm| {
     //     exec(&ctx, w, stm) catch |e| {
