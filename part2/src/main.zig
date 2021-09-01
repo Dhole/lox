@@ -94,7 +94,7 @@ const Main = struct {
         defer s.deinit();
         const tokens = try s.scanTokens();
 
-        var p = Parser.init(allocator, tokens);
+        var p = try Parser.init(allocator, &self.interpreter.funcArena, tokens);
         defer p.deinit();
 
         var statements = p.parse() catch |e| {

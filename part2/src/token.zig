@@ -1,5 +1,6 @@
 const std = @import("std");
 
+const Allocator = std.mem.Allocator;
 const FmtOpts = std.fmt.FormatOptions;
 
 pub const TokenType = enum {
@@ -35,6 +36,23 @@ pub const Token = struct {
             .lexeme = lexeme,
             .literal = literal,
             .line = line,
+        };
+    }
+
+    pub fn clone(self: *const Self, allocator: *Allocator) !Self {
+        const lexeme = try allocator.dupe(u8, self.lexeme);
+        return Self{
+            .type = self.type,
+            .lexeme = lexeme,
+            .literal = if (self.literal) |lit|
+                switch (lit) {
+                    .identifier => |v| Literal{ .identifier = v },
+                    .string => |v| Literal{ .string = v[1 .. v.len - 1] },
+                    .number => |v| Literal{ .number = v },
+                }
+            else
+                null,
+            .line = self.line,
         };
     }
 

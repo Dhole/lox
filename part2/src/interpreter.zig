@@ -42,24 +42,26 @@ pub const Interpreter = struct {
     const Self = @This();
 
     allocator: *Allocator,
+    funcArena: std.heap.ArenaAllocator,
     globals: *Environment,
     env: *Environment,
 
     pub fn init(allocator: *Allocator) !Self {
         var env = (try allocator.create(Environment));
         env.* = Environment.init(allocator, null);
-        std.debug.print("hello\n", .{});
         try env.define("clock", Value{ .nativeFunc = .{ .arity = 0, .call = fnClock } });
         return Self{
             .allocator = allocator,
+            .funcArena = std.heap.ArenaAllocator.init(allocator),
             .globals = env,
             .env = env,
         };
     }
 
     pub fn deinit(self: *Self) void {
-        self.env.deinit();
+        self.globals.deinit();
         self.allocator.destroy(self.env);
+        self.funcArena.deinit();
         return;
     }
 
@@ -207,7 +209,8 @@ pub const Interpreter = struct {
 
     fn funcArity(callee: Value) u32 {
         return switch (callee) {
-            // .nativeFunc => |*n| n.arity,
+            .loxFunc => |*f| @intCast(u32, f.declaration.params.items.len),
+            .nativeFunc => |*f| f.arity,
             else => 0,
         };
     }
@@ -215,10 +218,12 @@ pub const Interpreter = struct {
     fn loxCall(self: *Self, c: anytype, func: *const LoxFunc, arguments: []Value, result: *Value) !void {
         _ = result;
         var env = Environment.init(self.allocator, self.globals);
+        defer env.deinit();
         for (func.declaration.params.items) |*param, i| {
             try env.define(param.lexeme, arguments[i]);
         }
         try self.execBlock(c, func.declaration.body, &env);
+        result.* = .nil;
     }
 
     fn call(self: *Self, c: anytype, tok: Token, callee: Value, arguments: []Value) Error!Value {
@@ -272,8 +277,8 @@ pub const Interpreter = struct {
     pub fn exec(self: *Self, c: anytype, stm: *const Stmt) Error!void {
         switch (stm.*) {
             .function => |f| {
-                _ = f;
-                @panic("unimplemented");
+                const function = Value{ .loxFunc = .{ .declaration = f } };
+                try self.env.define(f.name.lexeme, function);
             },
             .expression => |e| {
                 _ = try self.eval(c, e);
@@ -344,18 +349,20 @@ test "interpreter" {
     const Scanner = scanner.Scanner;
     const Parser = parser.Parser;
 
-    const src = "var a = 1; var b = 2; print a + b; { var a = 5; print a; } print a; print clock();";
+    // const src = "var a = 1; var b = 2; print a + b; { var a = 5; print a; } print a; print clock();";
     // const src = "var a = \"foo\"; { var a = \"bar\"; } ";
+    const src = "fun foo(a) { print a + 1; } foo(2);";
     var s = try Scanner.init(std.testing.allocator, src);
     defer s.deinit();
     var tokens = try s.scanTokens();
-    var p = Parser.init(std.testing.allocator, tokens);
+
+    var int = try Interpreter.init(std.testing.allocator);
+    defer int.deinit();
+    var p = try Parser.init(std.testing.allocator, &int.funcArena, tokens);
     defer p.deinit();
     var statements = try p.parse();
     std.debug.print("{s}\n", .{statements});
 
-    var int = try Interpreter.init(std.testing.allocator);
-    defer int.deinit();
     var w = std.io.getStdErr().writer();
     try int.interpret(w, statements.items);
 
