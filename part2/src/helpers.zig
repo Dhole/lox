@@ -66,21 +66,25 @@ pub fn reportRuntimeError(e: RuntimeError) void {
     hadRuntimeError = true;
 }
 
-pub const Context = struct {
-    const Self = @This();
-    err: ?RuntimeError,
+pub fn Context(comptime Writer: type) type {
+    return struct {
+        const Self = @This();
+        w: Writer,
+        err: ?RuntimeError,
 
-    pub fn init() Self {
-        return Self{
-            .err = null,
-        };
-    }
+        pub fn init(w: Writer) Self {
+            return Self{
+                .w = w,
+                .err = null,
+            };
+        }
 
-    pub fn errSet(self: *Self, tok: Token, comptime fmt: []const u8, args: anytype) !void {
-        self.err = .{ .tok = undefined, .buf = undefined, .msg = undefined };
-        if (self.err) |*err| {
-            err.tok = tok;
-            err.msg = try bufPrint(&err.buf, fmt, args);
-        } else unreachable;
-    }
-};
+        pub fn errSet(self: *Self, tok: Token, comptime fmt: []const u8, args: anytype) !void {
+            self.err = .{ .tok = undefined, .buf = undefined, .msg = undefined };
+            if (self.err) |*err| {
+                err.tok = tok;
+                err.msg = try bufPrint(&err.buf, fmt, args);
+            } else unreachable;
+        }
+    };
+}

@@ -47,7 +47,7 @@ pub const Environment = struct {
         }
     }
 
-    pub fn assign(self: *Self, c: *Context, name: Token, value: Value) !void {
+    pub fn assign(self: *Self, c: anytype, name: Token, value: Value) !void {
         if (self.values.getEntry(name.lexeme)) |entry| {
             entry.value_ptr.free(self.allocator);
             entry.value_ptr.* = try value.clone(self.allocator);
@@ -60,7 +60,7 @@ pub const Environment = struct {
         }
     }
 
-    pub fn get(self: *Self, c: *Context, name: Token) !Value {
+    pub fn get(self: *Self, c: anytype, name: Token) !Value {
         if (self.values.get(name.lexeme)) |val| {
             return val;
         } else {
