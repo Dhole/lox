@@ -5,11 +5,13 @@ const Allocator = std.mem.Allocator;
 
 const token = @import("token.zig");
 const interpreter = @import("interpreter.zig");
+const environment = @import("environment.zig");
 
 const Token = token.Token;
 const Lit = token.Token.Literal;
 const TT = token.TokenType;
 const Interpreter = interpreter.Interpreter;
+const Environment = environment.Environment;
 
 pub const Binary = struct {
     left: *const Expr,
@@ -41,6 +43,7 @@ pub const NativeFunc = struct {
 };
 
 pub const LoxFunc = struct {
+    closure: *Environment,
     declaration: Function,
 };
 

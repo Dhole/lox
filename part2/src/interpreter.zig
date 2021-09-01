@@ -239,7 +239,7 @@ pub const Interpreter = struct {
 
     fn loxCall(self: *Self, c: anytype, func: *const LoxFunc, arguments: []Value, result: *Value) !void {
         _ = result;
-        var env = Environment.init(self.allocator, self.globals);
+        var env = Environment.init(self.allocator, func.closure);
         defer env.deinit();
         for (func.declaration.params.items) |*param, i| {
             try env.define(param.lexeme, arguments[i]);
@@ -312,7 +312,7 @@ pub const Interpreter = struct {
         }
         switch (stm.*) {
             .function => |f| {
-                const function = Value{ .loxFunc = .{ .declaration = f } };
+                const function = Value{ .loxFunc = .{ .declaration = f, .closure = self.env } };
                 try self.env.define(f.name.lexeme, function);
             },
             .expression => |e| {
@@ -391,7 +391,22 @@ test "interpreter" {
     // const src = "var a = 1; var b = 2; print a + b; { var a = 5; print a; } print a; print clock();";
     // const src = "var a = \"foo\"; { var a = \"bar\"; } ";
     // const src = "fun foo(a) { print a + 1; } foo(2);";
-    const src = "fun foo() { print \"hello world\"; } foo();";
+    // const src = "fun foo() { print \"hello world\"; } foo();";
+    const src =
+        \\fun makeCounter() {
+        \\  var i = 0;
+        \\  fun count() {
+        \\    i = i + 1;
+        \\    print i;
+        \\  }
+        \\
+        \\  return count;
+        \\}
+        \\
+        \\var counter = makeCounter();
+        \\counter(); // "1".
+        \\counter(); // "2".
+    ;
     var s = try Scanner.init(std.testing.allocator, src);
     defer s.deinit();
     var tokens = try s.scanTokens();
@@ -401,7 +416,7 @@ test "interpreter" {
     var p = try Parser.init(std.testing.allocator, &int.funcArena, tokens);
     defer p.deinit();
     var statements = try p.parse();
-    std.debug.print("{s}\n", .{statements});
+    // std.debug.print("{s}\n", .{statements});
 
     var w = std.io.getStdErr().writer();
     try int.interpret(w, statements.items);
