@@ -169,12 +169,18 @@ pub const Function = struct {
     body: ArrayList(Stmt),
 };
 
+pub const RetStmt = struct {
+    keyword: Token,
+    value: *Expr,
+};
+
 pub const Stmt = union(enum) {
     block: ArrayList(Stmt),
     expression: *Expr,
     function: Function,
     ifStmt: IfStmt,
     print: *Expr,
+    retStmt: RetStmt,
     varDecl: Var,
     whileStmt: WhileStmt,
 };

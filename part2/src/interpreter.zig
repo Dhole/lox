@@ -29,7 +29,7 @@ const NativeFunc = expr.NativeFunc;
 const LoxFunc = expr.LoxFunc;
 const Environment = environment.Environment;
 
-const Error = error{ RuntimeError, OutOfMemory } || std.os.WriteError || std.fmt.BufPrintError;
+const Error = error{ RuntimeError, OutOfMemory, Return } || std.os.WriteError || std.fmt.BufPrintError;
 
 fn fnClock(interpreter: *Interpreter, arguments: []Value, result: *Value) void {
     _ = interpreter;
@@ -41,6 +41,8 @@ fn fnClock(interpreter: *Interpreter, arguments: []Value, result: *Value) void {
 pub const Interpreter = struct {
     const Self = @This();
 
+    scratch: std.heap.ArenaAllocator,
+    scratchLen: u32,
     allocator: *Allocator,
     funcArena: std.heap.ArenaAllocator,
     globals: *Environment,
@@ -53,6 +55,8 @@ pub const Interpreter = struct {
         return Self{
             .allocator = allocator,
             .funcArena = std.heap.ArenaAllocator.init(allocator),
+            .scratch = std.heap.ArenaAllocator.init(allocator),
+            .scratchLen = 0,
             .globals = env,
             .env = env,
         };
@@ -62,7 +66,20 @@ pub const Interpreter = struct {
         self.globals.deinit();
         self.allocator.destroy(self.env);
         self.funcArena.deinit();
+        self.scratch.deinit();
         return;
+    }
+
+    fn scratchAlloc(self: *Self, comptime T: type, n: anytype) ![]T {
+        var v = try self.scratch.allocator.alloc(T, n);
+        self.scratchLen += @intCast(u32, n);
+        return v;
+    }
+
+    fn scratchReset(self: *Self) void {
+        self.scratch.deinit();
+        self.scratch = std.heap.ArenaAllocator.init(self.allocator);
+        self.scratchLen = 0;
     }
 
     fn isTruthy(val: Value) bool {
@@ -165,7 +182,12 @@ pub const Interpreter = struct {
                     return Value{ .number = (left.number) + (right.number) };
                 }
                 if (left == .string and right == .string) {
-                    @panic("'string + string' not yet implemented");
+                    const l = left.string;
+                    const r = right.string;
+                    var lr = try self.scratchAlloc(u8, l.len + r.len);
+                    std.mem.copy(u8, lr[0..], l);
+                    std.mem.copy(u8, lr[l.len..], r);
+                    return Value{ .string = lr };
                 }
                 try c.errSet(exp.operator, "Operands must be two numbers or two strings.", .{});
                 return error.RuntimeError;
@@ -222,7 +244,17 @@ pub const Interpreter = struct {
         for (func.declaration.params.items) |*param, i| {
             try env.define(param.lexeme, arguments[i]);
         }
-        try self.execBlock(c, func.declaration.body, &env);
+        self.execBlock(c, func.declaration.body, &env) catch |err| {
+            switch (err) {
+                error.Return => {
+                    const val = if (c.retVal) |v| v else unreachable;
+                    result.* = val;
+                    c.retVal = null;
+                    return;
+                },
+                else => return err,
+            }
+        };
         result.* = .nil;
     }
 
@@ -275,6 +307,9 @@ pub const Interpreter = struct {
     }
 
     pub fn exec(self: *Self, c: anytype, stm: *const Stmt) Error!void {
+        if (self.scratchLen > 0x1000) {
+            self.scratchReset();
+        }
         switch (stm.*) {
             .function => |f| {
                 const function = Value{ .loxFunc = .{ .declaration = f } };
@@ -309,6 +344,10 @@ pub const Interpreter = struct {
                         try self.exec(c, elseBranch);
                     }
                 }
+            },
+            .retStmt => |retStmt| {
+                c.retVal = try self.eval(c, retStmt.value);
+                return error.Return;
             },
             .whileStmt => |whileStmt| {
                 while (isTruthy(try self.eval(c, whileStmt.condition))) {
@@ -351,7 +390,8 @@ test "interpreter" {
 
     // const src = "var a = 1; var b = 2; print a + b; { var a = 5; print a; } print a; print clock();";
     // const src = "var a = \"foo\"; { var a = \"bar\"; } ";
-    const src = "fun foo(a) { print a + 1; } foo(2);";
+    // const src = "fun foo(a) { print a + 1; } foo(2);";
+    const src = "fun foo() { print \"hello world\"; } foo();";
     var s = try Scanner.init(std.testing.allocator, src);
     defer s.deinit();
     var tokens = try s.scanTokens();

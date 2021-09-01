@@ -4,9 +4,11 @@ const FmtOpts = std.fmt.FormatOptions;
 const bufPrint = std.fmt.bufPrint;
 
 const token = @import("token.zig");
+const expr = @import("expr.zig");
 
 const Token = token.Token;
 const TT = token.TokenType;
+const Value = expr.Value;
 
 pub var hadError = false;
 pub var hadRuntimeError = false;
@@ -71,11 +73,13 @@ pub fn Context(comptime Writer: type) type {
         const Self = @This();
         w: Writer,
         err: ?RuntimeError,
+        retVal: ?Value,
 
         pub fn init(w: Writer) Self {
             return Self{
                 .w = w,
                 .err = null,
+                .retVal = null,
             };
         }
 

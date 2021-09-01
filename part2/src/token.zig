@@ -46,8 +46,8 @@ pub const Token = struct {
             .lexeme = lexeme,
             .literal = if (self.literal) |lit|
                 switch (lit) {
-                    .identifier => |v| Literal{ .identifier = v },
-                    .string => |v| Literal{ .string = v[1 .. v.len - 1] },
+                    .identifier => Literal{ .identifier = lexeme },
+                    .string => Literal{ .string = lexeme[1 .. lexeme.len - 1] },
                     .number => |v| Literal{ .number = v },
                 }
             else

@@ -54,16 +54,16 @@ pub const Parser = struct {
 
     fn declaration(self: *Self) !Stmt {
         return blk: {
-            if (try self.match(&.{TT.FUN})) {
+            if (self.match(&.{TT.FUN})) {
                 break :blk self.function(FunctionKind.function);
-            } else if (try self.match(&.{TT.VAR})) {
+            } else if (self.match(&.{TT.VAR})) {
                 break :blk self.varDeclaration();
             }
             break :blk self.statement();
         } catch |e| {
             switch (e) {
                 error.ParseError => {
-                    try self.synchronize();
+                    self.synchronize();
                     return e;
                 },
                 else => return e,
@@ -75,11 +75,11 @@ pub const Parser = struct {
         const name = try self.consume(TT.IDENTIFIER, "Expect variable name.");
 
         var initializer: ?*Expr = null;
-        if (try self.match(&.{TT.EQUAL})) {
+        if (self.match(&.{TT.EQUAL})) {
             initializer = try self.expression();
         }
 
-        _ = try self.consume(TT.SEMICOLON, "Expect ';' after variable declaration.");
+        _ = try self._consume(TT.SEMICOLON, "Expect ';' after variable declaration.");
         return Stmt{ .varDecl = Var{ .name = name, .initializer = initializer } };
     }
 
@@ -100,26 +100,26 @@ pub const Parser = struct {
             .function => "Expect function name.",
             .method => "Expect method name.",
         });
-        _ = try self.consume(TT.LEFT_PAREN, switch (kind) {
+        _ = try self._consume(TT.LEFT_PAREN, switch (kind) {
             .function => "Expect '(' after function name.",
             .method => "Expect '(' after method name.",
         });
 
         var parameters = ArrayList(Token).init(&self.arena.allocator);
-        if (!try self.check(TT.RIGHT_PAREN)) {
+        if (!self.check(TT.RIGHT_PAREN)) {
             while (true) {
                 if (parameters.items.len >= 255) {
                     return err(try self.peek(), "Can't have more than 255 parameters.");
                 }
                 try parameters.append(try self.consume(TT.IDENTIFIER, "Expect parameter name."));
-                if (!try self.match(&.{TT.COMMA})) {
+                if (!self.match(&.{TT.COMMA})) {
                     break;
                 }
             }
         }
-        _ = try self.consume(TT.RIGHT_PAREN, "Expect ')' after parameters.");
+        _ = try self._consume(TT.RIGHT_PAREN, "Expect ')' after parameters.");
 
-        _ = try self.consume(TT.LEFT_BRACE, switch (kind) {
+        _ = try self._consume(TT.LEFT_BRACE, switch (kind) {
             .function => "Expect '{' before function body.",
             .method => "Expect '{' before method body.",
         });
@@ -140,33 +140,36 @@ pub const Parser = struct {
     //  }
 
     fn statement(self: *Self) Error!Stmt {
-        if (try self.match(&.{TT.IF})) {
+        if (self.match(&.{TT.IF})) {
             return self.ifStatement();
         }
-        if (try self.match(&.{TT.PRINT})) {
+        if (self.match(&.{TT.PRINT})) {
             return self.printStatement();
         }
-        if (try self.match(&.{TT.WHILE})) {
+        if (self.match(&.{TT.RETURN})) {
+            return self.returnStatement();
+        }
+        if (self.match(&.{TT.WHILE})) {
             return self.whileStatement();
         }
-        if (try self.match(&.{TT.FOR})) {
+        if (self.match(&.{TT.FOR})) {
             return self.forStatement();
         }
-        if (try self.match(&.{TT.LEFT_BRACE})) {
+        if (self.match(&.{TT.LEFT_BRACE})) {
             return Stmt{ .block = try self.block() };
         }
         return self.expressionStatement();
     }
 
     fn ifStatement(self: *Self) !Stmt {
-        _ = try self.consume(TT.LEFT_PAREN, "Expect '(' after 'if'.");
+        _ = try self._consume(TT.LEFT_PAREN, "Expect '(' after 'if'.");
         var condition = try self.expression();
-        _ = try self.consume(TT.RIGHT_PAREN, "Expect ')' after if condition.");
+        _ = try self._consume(TT.RIGHT_PAREN, "Expect ')' after if condition.");
 
         var thenBranch = try self.arena.allocator.create(Stmt);
         thenBranch.* = try self.statement();
         var elseBranch: ?*Stmt = null;
-        if (try self.match(&.{TT.ELSE})) {
+        if (self.match(&.{TT.ELSE})) {
             var s = try self.arena.allocator.create(Stmt);
             s.* = try self.statement();
             elseBranch = s;
@@ -176,9 +179,9 @@ pub const Parser = struct {
     }
 
     fn whileStatement(self: *Self) !Stmt {
-        _ = try self.consume(TT.LEFT_PAREN, "Expect '(' after 'while'.");
+        _ = try self._consume(TT.LEFT_PAREN, "Expect '(' after 'while'.");
         var condition = try self.expression();
-        _ = try self.consume(TT.RIGHT_PAREN, "Expect ')' after condition.");
+        _ = try self._consume(TT.RIGHT_PAREN, "Expect ')' after condition.");
         var body = try self.arena.allocator.create(Stmt);
         body.* = try self.statement();
 
@@ -186,12 +189,12 @@ pub const Parser = struct {
     }
 
     fn forStatement(self: *Self) !Stmt {
-        _ = try self.consume(TT.LEFT_PAREN, "Expect '(' after 'while'.");
+        _ = try self._consume(TT.LEFT_PAREN, "Expect '(' after 'while'.");
 
         var initializer: ?*Stmt = undefined;
-        if (try self.match(&.{TT.SEMICOLON})) {
+        if (self.match(&.{TT.SEMICOLON})) {
             initializer = null;
-        } else if (try self.match(&.{TT.VAR})) {
+        } else if (self.match(&.{TT.VAR})) {
             var _initializer = try self.arena.allocator.create(Stmt);
             _initializer.* = try self.varDeclaration();
             initializer = _initializer;
@@ -202,16 +205,16 @@ pub const Parser = struct {
         }
 
         var condition: ?*Expr = null;
-        if (!try self.check(TT.SEMICOLON)) {
+        if (!self.check(TT.SEMICOLON)) {
             condition = try self.expression();
         }
-        _ = try self.consume(TT.SEMICOLON, "Expect ';' after loop condition.");
+        _ = try self._consume(TT.SEMICOLON, "Expect ';' after loop condition.");
 
         var increment: ?*Expr = null;
-        if (!try self.check(TT.RIGHT_PAREN)) {
+        if (!self.check(TT.RIGHT_PAREN)) {
             increment = try self.expression();
         }
-        _ = try self.consume(TT.RIGHT_PAREN, "Expect ')' after for clauses.");
+        _ = try self._consume(TT.RIGHT_PAREN, "Expect ')' after for clauses.");
 
         var body = try self.statement();
 
@@ -246,24 +249,37 @@ pub const Parser = struct {
 
     fn printStatement(self: *Self) !Stmt {
         var value = try self.expression();
-        _ = try self.consume(TT.SEMICOLON, "Expect ';' after value.");
+        _ = try self._consume(TT.SEMICOLON, "Expect ';' after value.");
         return Stmt{ .print = value };
+    }
+
+    fn returnStatement(self: *Self) !Stmt {
+        var keyword = try self.previous();
+        var value: *Expr = undefined;
+        if (!self.check(TT.SEMICOLON)) {
+            value = try self.expression();
+        } else {
+            value = try self.arena.allocator.create(Expr);
+            value.* = Expr{ .literal = .{ .value = .nil } };
+        }
+        _ = try self._consume(TT.SEMICOLON, "Expect ';' after return value.");
+        return Stmt{ .retStmt = .{ .keyword = keyword, .value = value } };
     }
 
     fn expressionStatement(self: *Self) !Stmt {
         var value = try self.expression();
-        _ = try self.consume(TT.SEMICOLON, "Expect ';' after expression.");
+        _ = try self._consume(TT.SEMICOLON, "Expect ';' after expression.");
         return Stmt{ .expression = value };
     }
 
     fn block(self: *Self) Error!ArrayList(Stmt) {
         var statements = ArrayList(Stmt).init(&self.arena.allocator);
 
-        while (!try self.check(TT.RIGHT_BRACE) and !self.isAtEnd()) {
+        while (!self.check(TT.RIGHT_BRACE) and !self.isAtEnd()) {
             try statements.append(try self.declaration());
         }
 
-        _ = try self.consume(TT.RIGHT_BRACE, "Expect '}' after block.");
+        _ = try self._consume(TT.RIGHT_BRACE, "Expect '}' after block.");
         return statements;
     }
 
@@ -274,7 +290,7 @@ pub const Parser = struct {
     fn assignment(self: *Self) Error!*Expr {
         var exp = try self.orExpr();
 
-        if (try self.match(&.{TT.EQUAL})) {
+        if (self.match(&.{TT.EQUAL})) {
             const equals = try self.previous();
             const value = try self.assignment();
             switch (exp.*) {
@@ -295,7 +311,7 @@ pub const Parser = struct {
     fn orExpr(self: *Self) !*Expr {
         var exp = try self.andExpr();
 
-        while (try self.match(&.{TT.OR})) {
+        while (self.match(&.{TT.OR})) {
             var operator = try self.previous();
             var right = try self.andExpr();
             var exp1 = try self.arena.allocator.create(Expr);
@@ -309,7 +325,7 @@ pub const Parser = struct {
     fn andExpr(self: *Self) !*Expr {
         var exp = try self.equality();
 
-        while (try self.match(&.{TT.AND})) {
+        while (self.match(&.{TT.AND})) {
             var operator = try self.previous();
             var right = try self.equality();
             var exp1 = try self.arena.allocator.create(Expr);
@@ -323,7 +339,7 @@ pub const Parser = struct {
     fn binLeftAssoc(self: *Self, operandFn: fn (*Self) Error!*Expr, tokens: []const TT) !*Expr {
         var exp = try operandFn(self);
 
-        while (try self.match(tokens)) {
+        while (self.match(tokens)) {
             var operator = try self.previous();
             var right = try operandFn(self);
             var exp1 = try self.arena.allocator.create(Expr);
@@ -351,7 +367,7 @@ pub const Parser = struct {
     }
 
     fn unary(self: *Self) Error!*Expr {
-        if (try self.match(&.{ TT.BANG, TT.MINUS })) {
+        if (self.match(&.{ TT.BANG, TT.MINUS })) {
             var operator = try self.previous();
             var right = try self.unary();
             var e = try self.arena.allocator.create(Expr);
@@ -365,7 +381,7 @@ pub const Parser = struct {
         var exp = try self.primary();
 
         while (true) {
-            if (try self.match(&.{TT.LEFT_PAREN})) {
+            if (self.match(&.{TT.LEFT_PAREN})) {
                 exp = try self.finishCall(exp);
             } else {
                 break;
@@ -377,13 +393,13 @@ pub const Parser = struct {
 
     fn finishCall(self: *Self, callee: *Expr) Error!*Expr {
         var arguments = ArrayList(Expr).init(&self.arena.allocator);
-        if (!try self.check(TT.RIGHT_PAREN)) {
+        if (!self.check(TT.RIGHT_PAREN)) {
             while (true) {
                 if (arguments.items.len >= 255) {
                     return err(try self.peek(), "Can't have more than 255 arguments.");
                 }
                 try arguments.append((try self.expression()).*);
-                if (!try self.match(&.{TT.COMMA})) {
+                if (!self.match(&.{TT.COMMA})) {
                     break;
                 }
             }
@@ -398,19 +414,19 @@ pub const Parser = struct {
 
     fn primary(self: *Self) Error!*Expr {
         var exp = try self.arena.allocator.create(Expr);
-        if (try self.match(&.{TT.FALSE})) {
+        if (self.match(&.{TT.FALSE})) {
             exp.* = .{ .literal = .{ .value = .{ .boolean = false } } };
             return exp;
         }
-        if (try self.match(&.{TT.TRUE})) {
+        if (self.match(&.{TT.TRUE})) {
             exp.* = .{ .literal = .{ .value = .{ .boolean = true } } };
             return exp;
         }
-        if (try self.match(&.{TT.NIL})) {
+        if (self.match(&.{TT.NIL})) {
             exp.* = .{ .literal = .{ .value = .nil } };
             return exp;
         }
-        if (try self.match(&.{TT.NUMBER})) {
+        if (self.match(&.{TT.NUMBER})) {
             if ((try self.previous()).literal) |lit| {
                 switch (lit) {
                     .number => |n| {
@@ -423,7 +439,7 @@ pub const Parser = struct {
                 unreachable;
             }
         }
-        if (try self.match(&.{TT.STRING})) {
+        if (self.match(&.{TT.STRING})) {
             if ((try self.previous()).literal) |lit| {
                 switch (lit) {
                     .string => |s| {
@@ -436,13 +452,13 @@ pub const Parser = struct {
                 unreachable;
             }
         }
-        if (try self.match(&.{TT.IDENTIFIER})) {
+        if (self.match(&.{TT.IDENTIFIER})) {
             exp.* = .{ .variable = .{ .name = try self.previous() } };
             return exp;
         }
-        if (try self.match(&.{TT.LEFT_PAREN})) {
+        if (self.match(&.{TT.LEFT_PAREN})) {
             var exp0 = try self.expression();
-            _ = try self.consume(TT.RIGHT_PAREN, "Expect ')' after expression.");
+            _ = try self._consume(TT.RIGHT_PAREN, "Expect ')' after expression.");
             exp.* = .{ .grouping = .{ .expression = exp0 } };
             return exp;
         }
@@ -450,21 +466,21 @@ pub const Parser = struct {
         return err(try self.peek(), "Expect expression.");
     }
 
-    fn match(self: *Self, types: []const TT) !bool {
+    fn match(self: *Self, types: []const TT) bool {
         for (types) |t| {
-            if (try self.check(t)) {
-                _ = try self.advance();
+            if (self.check(t)) {
+                _ = self._advance();
                 return true;
             }
         }
         return false;
     }
 
-    fn check(self: *Self, t: TT) !bool {
+    fn check(self: *Self, t: TT) bool {
         if (self.isAtEnd()) {
             return false;
         }
-        return (try self.peek()).type == t;
+        return self._peek().type == t;
     }
 
     fn advance(self: *Self) !Token {
@@ -474,8 +490,19 @@ pub const Parser = struct {
         return try self.previous();
     }
 
+    fn _advance(self: *Self) Token {
+        if (!self.isAtEnd()) {
+            self.current += 1;
+        }
+        return self._previous();
+    }
+
     fn isAtEnd(self: *Self) bool {
-        return self.tokens.items[self.current].type == TT.EOF;
+        return self._peek().type == TT.EOF;
+    }
+
+    fn _peek(self: *Self) Token {
+        return self.tokens.items[self.current];
     }
 
     fn peek(self: *Self) !Token {
@@ -489,6 +516,10 @@ pub const Parser = struct {
         }
     }
 
+    fn _previous(self: *Self) Token {
+        return self.tokens.items[self.current - 1];
+    }
+
     fn previous(self: *Self) !Token {
         const tok = self.tokens.items[self.current - 1];
         // If we're parsing a function, return a copy of the token allocated in
@@ -500,11 +531,18 @@ pub const Parser = struct {
         }
     }
 
+    fn _consume(self: *Self, typ: TT, message: []const u8) error{ParseError}!Token {
+        if (self.check(typ)) {
+            return self._advance();
+        }
+        return err(self._peek(), message);
+    }
+
     fn consume(self: *Self, typ: TT, message: []const u8) error{ ParseError, OutOfMemory }!Token {
-        if (try self.check(typ)) {
+        if (self.check(typ)) {
             return self.advance();
         }
-        return err(try self.peek(), message);
+        return err(self._peek(), message);
     }
 
     fn err(t: Token, message: []const u8) error{ParseError} {
@@ -512,15 +550,15 @@ pub const Parser = struct {
         return error.ParseError;
     }
 
-    fn synchronize(self: *Self) !void {
-        _ = try self.advance();
+    fn synchronize(self: *Self) void {
+        _ = self._advance();
 
         while (!self.isAtEnd()) {
-            if ((try self.previous()).type == TT.SEMICOLON) {
+            if (self._previous().type == TT.SEMICOLON) {
                 return;
             }
 
-            switch ((try self.peek()).type) {
+            switch (self._peek().type) {
                 TT.CLASS => return,
                 TT.FUN => return,
                 TT.VAR => return,
@@ -532,7 +570,7 @@ pub const Parser = struct {
                 else => {},
             }
 
-            _ = try self.advance();
+            _ = self._advance();
         }
     }
 };
@@ -542,10 +580,11 @@ test "parser" {
     const Scanner = scanner.Scanner;
 
     // var s = try Scanner.init(std.testing.allocator, "(1 + 2 * 3) <= 4 * 5 - 6; var foo = 1 + 2;");
-    var s = try Scanner.init(std.testing.allocator, "foo(1, 2); bar(); fun foo(a) { 1 + 2; }");
+    var s = try Scanner.init(std.testing.allocator, "foo(1, 2); bar(); fun foo(a) { return 1 + 2; }");
     defer s.deinit();
     var tokens = try s.scanTokens();
     var funcArena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer funcArena.deinit();
     var parser = try Parser.init(std.testing.allocator, &funcArena, tokens);
     defer parser.deinit();
     // var exp: *Expr = undefined;
