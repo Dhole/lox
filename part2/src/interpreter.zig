@@ -63,7 +63,7 @@ pub const Interpreter = struct {
     }
 
     pub fn deinit(self: *Self) void {
-        self.globals.deinit();
+        _ = self.globals.deinit();
         self.allocator.destroy(self.env);
         self.funcArena.deinit();
         self.scratch.deinit();
@@ -122,6 +122,7 @@ pub const Interpreter = struct {
 
     fn evalUnary(self: *Self, c: anytype, exp: *const Unary) Error!Value {
         const right = try self.eval(c, exp.right);
+        defer right.unref();
 
         switch (exp.operator.type) {
             TT.MINUS => {
@@ -140,13 +141,14 @@ pub const Interpreter = struct {
     }
 
     fn evalAssign(self: *Self, c: anytype, exp: *const Assign) Error!Value {
-        const val = try self.eval(c, exp.value);
-        try self.env.assign(c, exp.name, val);
+        var val = try self.eval(c, exp.value);
+        try self.env.assign(c, exp.name, val.ref(false));
         return val;
     }
 
     fn evalLogical(self: *Self, c: anytype, exp: *const Logical) Error!Value {
         const left = try self.eval(c, exp.left);
+        defer left.unref();
 
         if (exp.operator.type == TT.OR) {
             if (isTruthy(left)) {
@@ -162,7 +164,9 @@ pub const Interpreter = struct {
 
     fn evalBinary(self: *Self, c: anytype, exp: *const Binary) Error!Value {
         const left = try self.eval(c, exp.left);
+        defer left.unref();
         const right = try self.eval(c, exp.right);
+        defer right.unref();
 
         switch (exp.operator.type) {
             TT.MINUS => {
@@ -225,6 +229,11 @@ pub const Interpreter = struct {
         for (exp.arguments.items) |*arg| {
             try arguments.append(try self.eval(c, arg));
         }
+        defer {
+            for (arguments.items) |*val| {
+                val.unref();
+            }
+        }
 
         return self.call(c, exp.paren, callee, arguments.items);
     }
@@ -239,16 +248,21 @@ pub const Interpreter = struct {
 
     fn loxCall(self: *Self, c: anytype, func: *const LoxFunc, arguments: []Value, result: *Value) !void {
         _ = result;
-        var env = Environment.init(self.allocator, func.closure);
-        defer env.deinit();
+        var env = try self.allocator.create(Environment);
+        env.* = Environment.init(self.allocator, func.closure);
+        defer {
+            if (env.deinit()) {
+                self.allocator.destroy(env);
+            }
+        }
         for (func.declaration.params.items) |*param, i| {
             try env.define(param.lexeme, arguments[i]);
         }
-        self.execBlock(c, func.declaration.body, &env) catch |err| {
+        self.execBlock(c, func.declaration.body, env) catch |err| {
             switch (err) {
                 error.Return => {
-                    const val = if (c.retVal) |v| v else unreachable;
-                    result.* = val;
+                    var val = if (c.retVal) |v| v else unreachable;
+                    result.* = val.ref(true);
                     c.retVal = null;
                     return;
                 },
@@ -312,14 +326,15 @@ pub const Interpreter = struct {
         }
         switch (stm.*) {
             .function => |f| {
-                const function = Value{ .loxFunc = .{ .declaration = f, .closure = self.env } };
+                const function = Value{ .loxFunc = .{ .declaration = f, .closure = self.env.ref(), .ret = 0 } };
                 try self.env.define(f.name.lexeme, function);
             },
             .expression => |e| {
-                _ = try self.eval(c, e);
+                (try self.eval(c, e)).unref();
             },
             .print => |e| {
                 const val = try self.eval(c, e);
+                defer val.unref();
                 try stringify(c.w, val);
                 try c.w.print("\n", .{});
             },
@@ -328,16 +343,22 @@ pub const Interpreter = struct {
                 if (v.initializer) |ini| {
                     val = try self.eval(c, ini);
                 }
-
-                try self.env.define(v.name.lexeme, val);
+                try self.env.define(v.name.lexeme, val.ref(false));
             },
             .block => |stms| {
-                var env = Environment.init(self.allocator, self.env);
-                defer env.deinit();
-                try self.execBlock(c, stms, &env);
+                var env = try self.allocator.create(Environment);
+                env.* = Environment.init(self.allocator, self.env);
+                defer {
+                    if (env.deinit()) {
+                        self.allocator.destroy(env);
+                    }
+                }
+                try self.execBlock(c, stms, env);
             },
             .ifStmt => |ifStmt| {
-                if (isTruthy(try self.eval(c, ifStmt.condition))) {
+                var cond = try self.eval(c, ifStmt.condition);
+                defer cond.unref();
+                if (isTruthy(cond)) {
                     try self.exec(c, ifStmt.thenBranch);
                 } else {
                     if (ifStmt.elseBranch) |elseBranch| {
@@ -350,7 +371,9 @@ pub const Interpreter = struct {
                 return error.Return;
             },
             .whileStmt => |whileStmt| {
-                while (isTruthy(try self.eval(c, whileStmt.condition))) {
+                var cond = try self.eval(c, whileStmt.condition);
+                defer cond.unref();
+                while (isTruthy(cond)) {
                     try self.exec(c, whileStmt.body);
                 }
             },
@@ -403,7 +426,11 @@ test "interpreter" {
         \\  return count;
         \\}
         \\
-        \\var counter = makeCounter();
+        \\fun baz() {
+        \\  return makeCounter();
+        \\}
+        \\
+        \\var counter = baz();
         \\counter(); // "1".
         \\counter(); // "2".
     ;

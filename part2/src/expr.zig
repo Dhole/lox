@@ -43,6 +43,7 @@ pub const NativeFunc = struct {
 };
 
 pub const LoxFunc = struct {
+    ret: u32,
     closure: *Environment,
     declaration: Function,
 };
@@ -70,6 +71,38 @@ pub const Value = union(ValueTag) {
             .string => |s| allocator.free(s),
             else => {},
         }
+    }
+
+    pub fn unref(self: *const Value) void {
+        switch (self.*) {
+            .loxFunc => |*f| {
+                // std.debug.print("DBG loxFunc{*}.unref\n", .{f});
+                // std.debug.dumpCurrentStackTrace(null);
+                if (f.closure.unref()) {
+                    f.closure.allocator.destroy(f.closure);
+                }
+            },
+            else => {},
+        }
+    }
+
+    pub fn ref(self: *Value, ret: bool) Value {
+        switch (self.*) {
+            .loxFunc => |*f| {
+                // defer {
+                //     std.debug.print("DBG loxFunc{*}.ref({s}) {{ .ret = {d} }}\n", .{ f, ret, f.ret });
+                // }
+                if (ret and f.ret == 0) {
+                    f.ret += 1;
+                } else if (!ret and f.ret > 0) {
+                    f.ret -= 1;
+                    return self.*;
+                }
+                _ = f.closure.ref();
+            },
+            else => {},
+        }
+        return self.*;
     }
 };
 

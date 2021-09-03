@@ -20,22 +20,70 @@ pub const Environment = struct {
     allocator: *Allocator,
     enclosing: ?*Self,
     values: StringHashMap(Value),
+    refs: i32, // Number of references in closures
 
     pub fn init(allocator: *Allocator, enclosing: ?*Self) Self {
         return Self{
             .allocator = allocator,
             .enclosing = enclosing,
             .values = StringHashMap(Value).init(allocator),
+            .refs = 1,
         };
     }
 
-    pub fn deinit(self: *Self) void {
+    // Returns true if deinit frees the Environment
+    pub fn deinit(self: *Self) bool {
+        // std.debug.print("DBG env{*}.deinit {{ .refs = {d} }}\n", .{ self, self.refs });
+        if (self.refs < 0) {
+            @panic("env.deinit oh no");
+        }
         var iterator = self.values.iterator();
         while (iterator.next()) |entry| {
-            self.allocator.free(entry.key_ptr.*);
+            entry.value_ptr.unref();
+        }
+        self.refs -= 1;
+        if (self.refs > 0) {
+            return false;
+        }
+        self.free();
+        return true;
+    }
+
+    fn free(self: *Self) void {
+        var iterator = self.values.iterator();
+        while (iterator.next()) |entry| {
             entry.value_ptr.free(self.allocator);
+            self.allocator.free(entry.key_ptr.*);
         }
         self.values.deinit();
+    }
+
+    pub fn ref(self: *Self) *Self {
+        self.refs += 1;
+        // std.debug.print("DBG env{*}.ref {{ .refs = {d}, .enclosing = {*} }}\n", .{ self, self.refs, self.enclosing });
+        // std.debug.dumpCurrentStackTrace(null);
+        if (self.enclosing) |enclosing| {
+            _ = enclosing.ref();
+        }
+        return self;
+    }
+
+    pub fn unref(self: *Self) bool {
+        self.refs -= 1;
+        if (self.refs < 0) {
+            @panic("env.unref oh no");
+        }
+        // std.debug.print("DBG env{*}.unref {{ .refs = {d} }}\n", .{ self, self.refs });
+        if (self.enclosing) |enclosing| {
+            if (enclosing.unref()) {
+                enclosing.allocator.destroy(enclosing);
+            }
+        }
+        if (self.refs > 0) {
+            return false;
+        }
+        self.free();
+        return true;
     }
 
     pub fn define(self: *Self, name: []const u8, value: Value) !void {
@@ -48,8 +96,13 @@ pub const Environment = struct {
     }
 
     pub fn assign(self: *Self, c: anytype, name: Token, value: Value) !void {
+        // std.debug.print("DBG env.assign {s}\n", .{name});
         if (self.values.getEntry(name.lexeme)) |entry| {
-            entry.value_ptr.free(self.allocator);
+            var old = entry.value_ptr.*;
+            defer {
+                old.unref();
+                old.free(self.allocator);
+            }
             entry.value_ptr.* = try value.clone(self.allocator);
         } else {
             if (self.enclosing) |enclosing| {
@@ -61,10 +114,12 @@ pub const Environment = struct {
     }
 
     pub fn get(self: *Self, c: anytype, name: Token) !Value {
+        // std.debug.print("DBG env.get {s}\n", .{name});
         if (self.values.get(name.lexeme)) |val| {
             return val;
         } else {
             if (self.enclosing) |enclosing| {
+                // std.debug.print("DBG env.enclosing = {*}\n", .{self.enclosing});
                 return enclosing.get(c, name);
             }
             try c.errSet(name, "Undefined variable.", .{});
