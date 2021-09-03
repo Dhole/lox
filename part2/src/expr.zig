@@ -79,6 +79,7 @@ pub const Value = union(ValueTag) {
                 // std.debug.print("DBG loxFunc{*}.unref\n", .{f});
                 // std.debug.dumpCurrentStackTrace(null);
                 if (f.closure.unref()) {
+                    // std.debug.print("DBG val{{{s}}}.destroy env{*}\n", .{ f.declaration.name.lexeme, f.closure });
                     f.closure.allocator.destroy(f.closure);
                 }
             },
@@ -94,9 +95,9 @@ pub const Value = union(ValueTag) {
                 // }
                 if (ret) {
                     f.ret += 1;
-                    if (f.ret > 1) {
-                        return self.*;
-                    }
+                    // if (f.ret > 1) {
+                    //     return self.*;
+                    // }
                 } else if (!ret and f.ret > 0) {
                     f.ret = 0;
                     return self.*;

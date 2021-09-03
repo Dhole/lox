@@ -33,7 +33,6 @@ pub const Environment = struct {
 
     // Returns true if deinit frees the Environment
     pub fn deinit(self: *Self) bool {
-        // std.debug.print("DBG env{*}.deinit {{ .refs = {d} }}\n", .{ self, self.refs });
         if (self.refs < 0) {
             @panic("env.deinit oh no");
         }
@@ -42,6 +41,7 @@ pub const Environment = struct {
             entry.value_ptr.unref();
         }
         self.refs -= 1;
+        // std.debug.print("DBG env{*}.deinit {{ .refs = {d} }}\n", .{ self, self.refs });
         if (self.refs > 0) {
             return false;
         }
@@ -76,6 +76,7 @@ pub const Environment = struct {
         // std.debug.print("DBG env{*}.unref {{ .refs = {d} }}\n", .{ self, self.refs });
         if (self.enclosing) |enclosing| {
             if (enclosing.unref()) {
+                // std.debug.print("DBG env.destroy env{*}\n", .{enclosing});
                 enclosing.allocator.destroy(enclosing);
             }
         }

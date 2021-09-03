@@ -64,7 +64,7 @@ pub const Interpreter = struct {
 
     pub fn deinit(self: *Self) void {
         _ = self.globals.deinit();
-        self.allocator.destroy(self.env);
+        self.allocator.destroy(self.globals);
         self.funcArena.deinit();
         self.scratch.deinit();
         return;
@@ -252,6 +252,7 @@ pub const Interpreter = struct {
         env.* = Environment.init(self.allocator, func.closure);
         defer {
             if (env.deinit()) {
+                // std.debug.print("DBG destroy env{*}\n", .{env});
                 self.allocator.destroy(env);
             }
         }
@@ -350,6 +351,7 @@ pub const Interpreter = struct {
                 env.* = Environment.init(self.allocator, self.env);
                 defer {
                     if (env.deinit()) {
+                        // std.debug.print("DBG int.destroy env{*}\n", .{env});
                         self.allocator.destroy(env);
                     }
                 }
@@ -417,8 +419,10 @@ test "interpreter" {
     // const src = "fun foo() { print \"hello world\"; } foo();";
     const src =
         \\fun makeCounter() {
+        \\  print "makeCounter";
         \\  var i = 0;
         \\  fun count() {
+        \\    print "count";
         \\    i = i + 1;
         \\    print i;
         \\  }
@@ -430,16 +434,23 @@ test "interpreter" {
         \\  return makeCounter();
         \\}
         \\
+        \\var x;
         \\fun bar() {
-        \\  var x = baz();
+        \\  print "AAA";
+        \\  x = baz();
+        \\  print "BBB";
         \\  return x;
         \\  // fun count() {
         \\  //   print "hello";
         \\  // }
         \\  // return count;
         \\}
+        \\print "CCC";
         \\
         \\var counter = bar();
+        \\// bar();
+        \\// var counter = x;
+        \\print "DDD";
         \\counter(); // "1".
         \\counter(); // "2".
     ;
