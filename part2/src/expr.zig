@@ -92,10 +92,13 @@ pub const Value = union(ValueTag) {
                 // defer {
                 //     std.debug.print("DBG loxFunc{*}.ref({s}) {{ .ret = {d} }}\n", .{ f, ret, f.ret });
                 // }
-                if (ret and f.ret == 0) {
+                if (ret) {
                     f.ret += 1;
+                    if (f.ret > 1) {
+                        return self.*;
+                    }
                 } else if (!ret and f.ret > 0) {
-                    f.ret -= 1;
+                    f.ret = 0;
                     return self.*;
                 }
                 _ = f.closure.ref();

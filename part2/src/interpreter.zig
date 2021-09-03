@@ -430,7 +430,16 @@ test "interpreter" {
         \\  return makeCounter();
         \\}
         \\
-        \\var counter = baz();
+        \\fun bar() {
+        \\  var x = baz();
+        \\  return x;
+        \\  // fun count() {
+        \\  //   print "hello";
+        \\  // }
+        \\  // return count;
+        \\}
+        \\
+        \\var counter = bar();
         \\counter(); // "1".
         \\counter(); // "2".
     ;
