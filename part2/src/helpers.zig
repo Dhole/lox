@@ -40,7 +40,7 @@ pub fn report(line: u32, where: []const u8, msg: []const u8) void {
     hadError = true;
 }
 
-pub const RuntimeError = struct {
+pub const LoxError = struct {
     const Self = @This();
     tok: Token,
     buf: [128]u8,
@@ -62,9 +62,14 @@ pub const RuntimeError = struct {
     }
 };
 
+pub fn reportResolveError(e: LoxError) void {
+    std.log.err("resolve error: [line {d}] {s}", .{ e.tok.line, e.msg });
+    hadError = true;
+}
+
 // Originally "runtimeError"
-pub fn reportRuntimeError(e: RuntimeError) void {
-    std.log.err("[line {d}] {s}", .{ e.tok.line, e.msg });
+pub fn reportRuntimeError(e: LoxError) void {
+    std.log.err("runtime error: [line {d}] {s}", .{ e.tok.line, e.msg });
     hadRuntimeError = true;
 }
 
@@ -72,7 +77,7 @@ pub fn Context(comptime Writer: type) type {
     return struct {
         const Self = @This();
         w: Writer,
-        err: ?RuntimeError,
+        err: ?LoxError,
         retVal: ?Value,
 
         pub fn init(w: Writer) Self {

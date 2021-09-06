@@ -96,15 +96,19 @@ pub const Environment = struct {
         }
     }
 
+    fn _assign(self: *Self, value_ptr: *Value, value: Value) !void {
+        var old = value_ptr.*;
+        defer {
+            old.unref();
+            old.free(self.allocator);
+        }
+        value_ptr.* = try value.clone(self.allocator);
+    }
+
     pub fn assign(self: *Self, c: anytype, name: Token, value: Value) !void {
         // std.debug.print("DBG env.assign {s}\n", .{name});
         if (self.values.getEntry(name.lexeme)) |entry| {
-            var old = entry.value_ptr.*;
-            defer {
-                old.unref();
-                old.free(self.allocator);
-            }
-            entry.value_ptr.* = try value.clone(self.allocator);
+            try self._assign(entry.value_ptr, value);
         } else {
             if (self.enclosing) |enclosing| {
                 return enclosing.assign(c, name, value);
@@ -112,6 +116,11 @@ pub const Environment = struct {
             try c.errSet(name, "Undefined variable.", .{});
             return error.RuntimeError;
         }
+    }
+
+    pub fn assignAt(self: *Self, distance: usize, name: Token, val: Value) !void {
+        var entry = self.ancestor(distance).values.getEntry(name.lexeme).?;
+        try self._assign(entry.value_ptr, val);
     }
 
     pub fn get(self: *Self, c: anytype, name: Token) !Value {
@@ -126,6 +135,19 @@ pub const Environment = struct {
             try c.errSet(name, "Undefined variable.", .{});
             return error.RuntimeError;
         }
+    }
+
+    pub fn getAt(self: *Self, distance: usize, name: []const u8) Value {
+        return self.ancestor(distance).values.get(name).?;
+    }
+
+    fn ancestor(self: *Self, distance: usize) *Self {
+        var env = self;
+        var i: usize = 0;
+        while (i < distance) : (i += 1) {
+            env = env.enclosing.?;
+        }
+        return env;
     }
 };
 

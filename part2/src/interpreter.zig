@@ -3,13 +3,15 @@ const std = @import("std");
 const ArrayList = std.ArrayList;
 const Allocator = std.mem.Allocator;
 const bufPrint = std.fmt.bufPrint;
+const HashMap = std.HashMap;
+const AutoContext = std.hash_map.AutoContext;
 
 const expr = @import("expr.zig");
 const token = @import("token.zig");
 const helpers = @import("helpers.zig");
 const environment = @import("environment.zig");
+const resolver = @import("resolver.zig");
 
-const RuntimeError = helpers.RuntimeError;
 const reportRuntimeError = helpers.reportRuntimeError;
 const Context = helpers.Context;
 const Token = token.Token;
@@ -28,6 +30,7 @@ const Stmt = expr.Stmt;
 const NativeFunc = expr.NativeFunc;
 const LoxFunc = expr.LoxFunc;
 const Environment = environment.Environment;
+const Resolver = resolver.Resolver;
 
 const Error = error{ RuntimeError, OutOfMemory, Return } || std.os.WriteError || std.fmt.BufPrintError;
 
@@ -47,6 +50,7 @@ pub const Interpreter = struct {
     funcArena: std.heap.ArenaAllocator,
     globals: *Environment,
     env: *Environment,
+    locals: HashMap(*const c_void, usize, AutoContext(*const c_void), 80),
 
     pub fn init(allocator: *Allocator) !Self {
         var env = (try allocator.create(Environment));
@@ -59,6 +63,7 @@ pub const Interpreter = struct {
             .scratchLen = 0,
             .globals = env,
             .env = env,
+            .locals = HashMap(*const c_void, usize, AutoContext(*const c_void), 80).init(allocator),
         };
     }
 
@@ -67,7 +72,13 @@ pub const Interpreter = struct {
         self.allocator.destroy(self.globals);
         self.funcArena.deinit();
         self.scratch.deinit();
+        self.locals.deinit();
         return;
+    }
+
+    pub fn resolve(self: *Self, exp: *const c_void, n: usize) !void {
+        // std.debug.print("DBG int.resolve({*}, {d})\n", .{ exp, n });
+        try self.locals.put(exp, n);
     }
 
     fn scratchAlloc(self: *Self, comptime T: type, n: anytype) ![]T {
@@ -136,13 +147,27 @@ pub const Interpreter = struct {
         }
     }
 
+    fn lookUpVariable(self: *Self, c: anytype, name: Token, exp: *const Variable) Error!Value {
+        if (self.locals.get(exp)) |distance| {
+            return self.env.getAt(distance, name.lexeme);
+        } else {
+            return self.globals.get(c, name);
+        }
+    }
+
     fn evalVar(self: *Self, c: anytype, exp: *const Variable) Error!Value {
-        return self.env.get(c, exp.name);
+        return self.lookUpVariable(c, exp.name, exp);
+        // return self.env.get(c, exp.name);
     }
 
     fn evalAssign(self: *Self, c: anytype, exp: *const Assign) Error!Value {
         var val = try self.eval(c, exp.value);
-        try self.env.assign(c, exp.name, val.ref(false));
+        // try self.env.assign(c, exp.name, val.ref(false));
+        if (self.locals.get(exp)) |distance| {
+            try self.env.assignAt(distance, exp.name, val.ref(false));
+        } else {
+            try self.globals.assign(c, exp.name, val.ref(false));
+        }
         return val;
     }
 
@@ -398,9 +423,14 @@ pub const Interpreter = struct {
     pub fn interpret(self: *Self, w: anytype, stms: []const Stmt) !void {
         var ctx = Context(@TypeOf(w)).init(w);
         for (stms) |*stm| {
-            self.exec(&ctx, stm) catch {
-                reportRuntimeError(ctx.err.?);
-                return;
+            self.exec(&ctx, stm) catch |e| {
+                switch (e) {
+                    error.RuntimeError => {
+                        reportRuntimeError(ctx.err.?);
+                        return;
+                    },
+                    else => return e,
+                }
             };
         }
     }
@@ -466,6 +496,10 @@ test "interpreter" {
     // std.debug.print("{s}\n", .{statements});
 
     var w = std.io.getStdErr().writer();
+
+    var res = try Resolver.init(&int, std.testing.allocator);
+    defer res.deinit();
+    try res.resolve(statements.items);
     try int.interpret(w, statements.items);
 
     // for (statements.items) |*stm| {

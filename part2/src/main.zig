@@ -6,10 +6,12 @@ const expr = @import("expr.zig");
 const parser = @import("parser.zig");
 const helpers = @import("helpers.zig");
 const interpreter = @import("interpreter.zig");
+const resolver = @import("resolver.zig");
 
 const Expr = expr.Expr;
 const Parser = parser.Parser;
 const Interpreter = interpreter.Interpreter;
+const Resolver = resolver.Resolver;
 
 const MAX_FILE_SIZE = 0x1000000;
 
@@ -39,16 +41,16 @@ pub fn main() !u8 {
 const Main = struct {
     const Self = @This();
 
-    interpreter: Interpreter,
+    int: Interpreter,
 
     fn init() !Self {
         return Self{
-            .interpreter = try Interpreter.init(allocator),
+            .int = try Interpreter.init(allocator),
         };
     }
 
     fn deinit(self: *Self) void {
-        self.interpreter.deinit();
+        self.int.deinit();
     }
 
     fn runFile(self: *Self, path: []u8) !u8 {
@@ -94,7 +96,7 @@ const Main = struct {
         defer s.deinit();
         const tokens = try s.scanTokens();
 
-        var p = try Parser.init(allocator, &self.interpreter.funcArena, tokens);
+        var p = try Parser.init(allocator, &self.int.funcArena, tokens);
         defer p.deinit();
 
         var statements = p.parse() catch |e| {
@@ -108,7 +110,20 @@ const Main = struct {
             return;
         }
 
+        var res = try Resolver.init(&self.int, allocator);
+        defer res.deinit();
+        res.resolve(statements.items) catch |e| {
+            switch (e) {
+                error.ResolveError => return,
+                else => return e,
+            }
+        };
+
+        if (helpers.hadError) {
+            return;
+        }
+
         var w = std.io.getStdOut().writer();
-        try self.interpreter.interpret(w, statements.items);
+        try self.int.interpret(w, statements.items);
     }
 };
