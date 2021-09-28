@@ -132,6 +132,13 @@ pub const Resolver = struct {
                     try self.resolveExpr(c, argument);
                 }
             },
+            .get => |*e| {
+                try self.resolveExpr(c, e.object);
+            },
+            .set => |*e| {
+                try self.resolveExpr(c, e.value);
+                try self.resolveExpr(c, e.object);
+            },
             .grouping => |*e| {
                 try self.resolveExpr(c, e.expression);
             },
@@ -193,6 +200,10 @@ pub const Resolver = struct {
                 try self.define(f.name);
 
                 try self.resolveFunction(c, f, .FUNCTION);
+            },
+            .class => |*s| {
+                try self.declare(c, s.name);
+                try self.define(s.name);
             },
             .ifStmt => |ifStmt| {
                 try self.resolveExpr(c, ifStmt.condition);

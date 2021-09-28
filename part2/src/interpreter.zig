@@ -29,6 +29,10 @@ const Logical = expr.Logical;
 const Stmt = expr.Stmt;
 const NativeFunc = expr.NativeFunc;
 const LoxFunc = expr.LoxFunc;
+const LoxClass = expr.LoxClass;
+const Get = expr.Get;
+const Set = expr.Set;
+const LoxInstance = expr.LoxInstance;
 const Environment = environment.Environment;
 const Resolver = resolver.Resolver;
 
@@ -107,6 +111,8 @@ pub const Interpreter = struct {
         }
         return switch (a) {
             .loxFunc => |va| std.mem.eql(u8, va.declaration.name.lexeme, b.loxFunc.declaration.name.lexeme),
+            .loxClass => |va| std.mem.eql(u8, va.name, b.loxClass.name),
+            .loxInstance => false,
             .nativeFunc => |va| va.call == b.nativeFunc.call,
             .boolean => |va| va == b.boolean,
             .number => |va| va == b.number,
@@ -132,7 +138,7 @@ pub const Interpreter = struct {
     }
 
     fn evalUnary(self: *Self, c: anytype, exp: *const Unary) Error!Value {
-        const right = try self.eval(c, exp.right);
+        var right = try self.eval(c, exp.right);
         defer right.unref();
 
         switch (exp.operator.type) {
@@ -172,7 +178,7 @@ pub const Interpreter = struct {
     }
 
     fn evalLogical(self: *Self, c: anytype, exp: *const Logical) Error!Value {
-        const left = try self.eval(c, exp.left);
+        var left = try self.eval(c, exp.left);
         defer left.unref();
 
         if (exp.operator.type == TT.OR) {
@@ -188,9 +194,9 @@ pub const Interpreter = struct {
     }
 
     fn evalBinary(self: *Self, c: anytype, exp: *const Binary) Error!Value {
-        const left = try self.eval(c, exp.left);
+        var left = try self.eval(c, exp.left);
         defer left.unref();
-        const right = try self.eval(c, exp.right);
+        var right = try self.eval(c, exp.right);
         defer right.unref();
 
         switch (exp.operator.type) {
@@ -263,9 +269,39 @@ pub const Interpreter = struct {
         return self.call(c, exp.paren, callee, arguments.items);
     }
 
+    fn evalGet(self: *Self, c: anytype, exp: *const Get) Error!Value {
+        var object = try self.eval(c, exp.object);
+        switch (object) {
+            .loxInstance => |i| {
+                return i.get(c, exp.name);
+            },
+            else => {
+                try c.errSet(exp.name, "Only instances have properties.", .{});
+                return error.RuntimeError;
+            },
+        }
+    }
+
+    fn evalSet(self: *Self, c: anytype, exp: *const Set) Error!Value {
+        var object = try self.eval(c, exp.object);
+        switch (object) {
+            .loxInstance => |i| {
+                // return i.get(c, exp.name);
+                var value = try self.eval(c, exp.value);
+                try i.set(exp.name, value.ref(false));
+                return value;
+            },
+            else => {
+                try c.errSet(exp.name, "Only instances have fields.", .{});
+                return error.RuntimeError;
+            },
+        }
+    }
+
     fn funcArity(callee: Value) u32 {
         return switch (callee) {
             .loxFunc => |*f| @intCast(u32, f.declaration.params.items.len),
+            .loxClass => 0,
             .nativeFunc => |*f| f.arity,
             else => 0,
         };
@@ -314,6 +350,12 @@ pub const Interpreter = struct {
             .nativeFunc => |*f| {
                 f.call(self, arguments, &result);
             },
+            .loxClass => |f| {
+                // var instance = try self.allocator.create(LoxInstance);
+                // instance.* = LoxInstance{ .allocator = self.allocator, .class = f, .refs = 1, .ret = 0 };
+                const instance = try LoxInstance.init(self.allocator, f);
+                return Value{ .loxInstance = instance };
+            },
             else => {
                 try c.errSet(tok, "Can only call functions and classes.", .{});
                 return error.RuntimeError;
@@ -326,6 +368,8 @@ pub const Interpreter = struct {
         return switch (exp.*) {
             .binary => |*e| try self.evalBinary(c, e),
             .call => |*e| try self.evalCall(c, e),
+            .get => |*e| try self.evalGet(c, e),
+            .set => |*e| try self.evalSet(c, e),
             .logical => |*e| try self.evalLogical(c, e),
             .grouping => |*e| try self.eval(c, e.expression),
             .literal => |*e| e.value,
@@ -355,11 +399,18 @@ pub const Interpreter = struct {
                 const function = Value{ .loxFunc = .{ .declaration = f, .closure = self.env.ref(), .ret = 0 } };
                 try self.env.define(f.name.lexeme, function);
             },
+            .class => |*s| {
+                try self.env.define(s.name.lexeme, Value{ .nil = {} });
+                var class = try self.funcArena.allocator.create(LoxClass);
+                class.* = .{ .name = s.name.lexeme };
+                const val = Value{ .loxClass = class };
+                try self.env.assign(c, s.name, val);
+            },
             .expression => |e| {
                 (try self.eval(c, e)).unref();
             },
             .print => |e| {
-                const val = try self.eval(c, e);
+                var val = try self.eval(c, e);
                 defer val.unref();
                 try stringify(c.w, val);
                 try c.w.print("\n", .{});
@@ -410,6 +461,8 @@ pub const Interpreter = struct {
     pub fn stringify(w: anytype, val: Value) Error!void {
         switch (val) {
             .loxFunc => |v| try w.print("<fn {s}>", .{v.declaration.name.lexeme}),
+            .loxClass => |v| try w.print("<class {s}>", .{v.name}),
+            .loxInstance => |v| try w.print("<instance {s}>", .{v.class.name}),
             .nativeFunc => |v| try w.print("<native fn {s}>", .{v}),
             .boolean => |v| try w.print("{s}", .{v}),
             .number => |v| {
@@ -447,42 +500,57 @@ test "interpreter" {
     // const src = "var a = \"foo\"; { var a = \"bar\"; } ";
     // const src = "fun foo(a) { print a + 1; } foo(2);";
     // const src = "fun foo() { print \"hello world\"; } foo();";
+    // const src =
+    //     \\fun makeCounter() {
+    //     \\  print "makeCounter";
+    //     \\  var i = 0;
+    //     \\  fun count() {
+    //     \\    print "count";
+    //     \\    i = i + 1;
+    //     \\    print i;
+    //     \\  }
+    //     \\
+    //     \\  return count;
+    //     \\}
+    //     \\
+    //     \\fun baz() {
+    //     \\  return makeCounter();
+    //     \\}
+    //     \\
+    //     \\var x;
+    //     \\fun bar() {
+    //     \\  print "AAA";
+    //     \\  x = baz();
+    //     \\  print "BBB";
+    //     \\  return x;
+    //     \\  // fun count() {
+    //     \\  //   print "hello";
+    //     \\  // }
+    //     \\  // return count;
+    //     \\}
+    //     \\print "CCC";
+    //     \\
+    //     \\var counter = bar();
+    //     \\// bar();
+    //     \\// var counter = x;
+    //     \\print "DDD";
+    //     \\counter(); // "1".
+    //     \\counter(); // "2".
+    // ;
+    // const src =
+    //     \\class DevonshireCream {
+    //     \\  serveOn() {
+    //     \\    return "Scones";
+    //     \\  }
+    //     \\}
+    //     \\
+    //     \\print DevonshireCream; // Prints "DevonshireCream".
+    // ;
     const src =
-        \\fun makeCounter() {
-        \\  print "makeCounter";
-        \\  var i = 0;
-        \\  fun count() {
-        \\    print "count";
-        \\    i = i + 1;
-        \\    print i;
-        \\  }
-        \\
-        \\  return count;
-        \\}
-        \\
-        \\fun baz() {
-        \\  return makeCounter();
-        \\}
-        \\
-        \\var x;
-        \\fun bar() {
-        \\  print "AAA";
-        \\  x = baz();
-        \\  print "BBB";
-        \\  return x;
-        \\  // fun count() {
-        \\  //   print "hello";
-        \\  // }
-        \\  // return count;
-        \\}
-        \\print "CCC";
-        \\
-        \\var counter = bar();
-        \\// bar();
-        \\// var counter = x;
-        \\print "DDD";
-        \\counter(); // "1".
-        \\counter(); // "2".
+        \\class Bagel {}
+        \\var bagel = Bagel();
+        \\var foo = bagel;
+        \\print bagel; // Prints "Bagel instance".
     ;
     var s = try Scanner.init(std.testing.allocator, src);
     defer s.deinit();

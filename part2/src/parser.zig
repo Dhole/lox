@@ -16,6 +16,7 @@ const Unary = expr.Unary;
 const Expr = expr.Expr;
 const Stmt = expr.Stmt;
 const Var = expr.Var;
+const Function = expr.Function;
 
 pub const Parser = struct {
     const Self = @This();
@@ -54,7 +55,9 @@ pub const Parser = struct {
 
     fn declaration(self: *Self) !Stmt {
         return blk: {
-            if (self.match(&.{TT.FUN})) {
+            if (self.match(&.{TT.CLASS})) {
+                break :blk self.classDeclaration();
+            } else if (self.match(&.{TT.FUN})) {
                 break :blk self.function(FunctionKind.function);
             } else if (self.match(&.{TT.VAR})) {
                 break :blk self.varDeclaration();
@@ -127,17 +130,16 @@ pub const Parser = struct {
         return Stmt{ .function = .{ .name = name, .params = parameters, .body = body } };
     }
 
-    //  private Stmt varDeclaration() {
-    //    Token name = consume(IDENTIFIER, "Expect variable name.");
-    //
-    //    Expr initializer = null;
-    //    if (match(EQUAL)) {
-    //      initializer = expression();
-    //    }
-    //
-    //    consume(SEMICOLON, "Expect ';' after variable declaration.");
-    //    return new Stmt.Var(name, initializer);
-    //  }
+    fn classDeclaration(self: *Self) !Stmt {
+        const name = try self.consume(TT.IDENTIFIER, "Expect class name.");
+        _ = try self.consume(TT.LEFT_BRACE, "Expect '{' before class body.");
+        var methods = ArrayList(Function).init(&self.arena.allocator);
+        while (!self.check(TT.RIGHT_BRACE) and !self.isAtEnd()) {
+            try methods.append((try self.function(FunctionKind.method)).function);
+        }
+        _ = try self.consume(TT.RIGHT_BRACE, "Expect '}' after class body.");
+        return Stmt{ .class = .{ .name = name, .methods = methods } };
+    }
 
     fn statement(self: *Self) Error!Stmt {
         if (self.match(&.{TT.IF})) {
@@ -300,6 +302,11 @@ pub const Parser = struct {
                     exp1.* = .{ .assign = .{ .name = name, .value = value } };
                     exp = exp1;
                 },
+                .get => |g| {
+                    var exp1 = try self.arena.allocator.create(Expr);
+                    exp1.* = .{ .set = .{ .name = g.name, .object = g.object, .value = value } };
+                    exp = exp1;
+                },
                 else => {
                     return err(equals, "Invalid assignment target.");
                 },
@@ -383,6 +390,11 @@ pub const Parser = struct {
         while (true) {
             if (self.match(&.{TT.LEFT_PAREN})) {
                 exp = try self.finishCall(exp);
+            } else if (self.match(&.{TT.DOT})) {
+                var name = try self.consume(TT.IDENTIFIER, "Expect property name after '.'.");
+                var exp1 = try self.arena.allocator.create(Expr);
+                exp1.* = Expr{ .get = .{ .name = name, .object = exp } };
+                exp = exp1;
             } else {
                 break;
             }
