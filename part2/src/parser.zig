@@ -464,6 +464,10 @@ pub const Parser = struct {
                 unreachable;
             }
         }
+        if (self.match(&.{TT.THIS})) {
+            exp.* = .{ .this = .{ .keyword = try self.previous() } };
+            return exp;
+        }
         if (self.match(&.{TT.IDENTIFIER})) {
             exp.* = .{ .variable = .{ .name = try self.previous() } };
             return exp;

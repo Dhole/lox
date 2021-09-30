@@ -46,13 +46,36 @@ pub const NativeFunc = struct {
 };
 
 pub const LoxFunc = struct {
+    const Self = @This();
     ret: u32,
     closure: *Environment,
     declaration: Function,
+    isInitializer: bool,
+
+    pub fn bind(
+        self: *const Self,
+        allocator: *Allocator,
+        instance: *LoxInstance,
+    ) std.mem.Allocator.Error!LoxFunc {
+        var env = try allocator.create(Environment);
+        env.* = Environment.init(allocator, self.closure);
+        try env.define("this", Value{ .loxInstance = instance });
+        return LoxFunc{ .declaration = self.declaration, .closure = env, .ret = 0, .isInitializer = self.isInitializer };
+    }
 };
 
 pub const LoxClass = struct {
+    const Self = @This();
     name: []const u8,
+    methods: StringHashMap(LoxFunc),
+
+    pub fn findMethod(self: *const Self, name: []const u8) ?LoxFunc {
+        if (self.methods.get(name)) |method| {
+            return method;
+        } else {
+            return null;
+        }
+    }
 };
 
 pub const LoxInstance = struct {
@@ -77,6 +100,7 @@ pub const LoxInstance = struct {
 
     pub fn deinit(self: *Self) void {
         // TODO: Maybe unref each field?
+        // std.debug.print("DBG {*}.deinit\n", .{self});
         var iterator = self.fields.iterator();
         while (iterator.next()) |entry| {
             entry.value_ptr.free(self.allocator);
@@ -86,9 +110,13 @@ pub const LoxInstance = struct {
         self.allocator.destroy(self);
     }
 
-    pub fn get(self: *Self, c: anytype, name: Token) !Value {
+    const Error = error{RuntimeError} || std.mem.Allocator.Error || std.fmt.BufPrintError;
+    pub fn get(self: *Self, c: anytype, name: Token) Error!Value {
         if (self.fields.get(name.lexeme)) |val| {
             return val;
+        } else if (self.class.findMethod(name.lexeme)) |method| {
+            var m = try method.bind(self.allocator, self);
+            return Value{ .loxFunc = m };
         } else {
             try c.errSet(name, "Undefined property {s}.", .{name.lexeme});
             return error.RuntimeError;
@@ -158,7 +186,7 @@ pub const Value = union(ValueTag) {
             },
             .loxInstance => |i| {
                 i.refs -= 1;
-                std.debug.print("DBG {*}.unref refs: {d}\n", .{ i, i.refs });
+                // std.debug.print("DBG {*}.unref refs: {d}\n", .{ i, i.refs });
                 if (i.refs == 0) {
                     // i.allocator.destroy(i);
                     i.deinit();
@@ -181,7 +209,7 @@ pub const Value = union(ValueTag) {
                 _ = f.closure.ref();
             },
             .loxInstance => |i| {
-                std.debug.print("DBG {*}.ref refs: {d}\n", .{ i, i.refs });
+                // std.debug.print("DBG {*}.ref refs: {d}\n", .{ i, i.refs });
                 if (ret) {
                     i.ret += 1;
                 } else if (!ret and i.ret > 0) {
@@ -238,6 +266,10 @@ pub const Set = struct {
     value: *const Expr,
 };
 
+pub const This = struct {
+    keyword: Token,
+};
+
 pub const Expr = union(enum) {
     binary: Binary,
     call: Call,
@@ -246,9 +278,20 @@ pub const Expr = union(enum) {
     literal: Literal,
     logical: Logical,
     set: Set,
+    this: This,
     unary: Unary,
     variable: Variable,
     assign: Assign,
+
+    pub fn isLiteralNil(self: *Expr) bool {
+        return switch (self.*) {
+            .literal => |l| switch (l.value) {
+                .nil => true,
+                else => false,
+            },
+            else => false,
+        };
+    }
 };
 
 fn parenthesize(w: anytype, name: []const u8, exps: []const *const Expr) anyerror!void {

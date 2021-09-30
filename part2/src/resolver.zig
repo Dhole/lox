@@ -22,6 +22,13 @@ const Error = error{ OutOfMemory, ResolveError } || std.fmt.BufPrintError;
 pub const FunctionType = enum {
     NONE,
     FUNCTION,
+    INITIALIZER,
+    METHOD,
+};
+
+pub const ClassType = enum {
+    NONE,
+    CLASS,
 };
 
 pub const Resolver = struct {
@@ -31,6 +38,7 @@ pub const Resolver = struct {
     int: *Interpreter,
     scopes: ArrayList(StringHashMap(bool)),
     currentFunc: FunctionType,
+    currentClass: ClassType,
 
     pub fn init(int: *Interpreter, allocator: *Allocator) !Self {
         return Self{
@@ -38,6 +46,7 @@ pub const Resolver = struct {
             .int = int,
             .scopes = ArrayList(StringHashMap(bool)).init(allocator),
             .currentFunc = .NONE,
+            .currentClass = .NONE,
         };
     }
 
@@ -139,6 +148,13 @@ pub const Resolver = struct {
                 try self.resolveExpr(c, e.value);
                 try self.resolveExpr(c, e.object);
             },
+            .this => |*e| {
+                if (self.currentClass == ClassType.NONE) {
+                    try c.errSet(e.keyword, "Can't use 'this' outside of a class.", .{});
+                    return error.ResolveError;
+                }
+                try self.resolveLocal(e, e.keyword);
+            },
             .grouping => |*e| {
                 try self.resolveExpr(c, e.expression);
             },
@@ -185,6 +201,9 @@ pub const Resolver = struct {
                 if (self.currentFunc == .NONE) {
                     try c.errSet(retStmt.keyword, "Can't return from top-level code.", .{});
                     return error.ResolveError;
+                } else if (!retStmt.value.isLiteralNil() and self.currentFunc == .INITIALIZER) {
+                    try c.errSet(retStmt.keyword, "Can't return a value from an initializer.", .{});
+                    return error.ResolveError;
                 }
                 try self.resolveExpr(c, retStmt.value);
             },
@@ -202,8 +221,19 @@ pub const Resolver = struct {
                 try self.resolveFunction(c, f, .FUNCTION);
             },
             .class => |*s| {
+                var enclosingClass = self.currentClass;
+                self.currentClass = ClassType.CLASS;
                 try self.declare(c, s.name);
                 try self.define(s.name);
+
+                try self.beginScope();
+                try self.scopesPeek().put("this", true);
+                for (s.methods.items) |*method| {
+                    const declaration = if (std.mem.eql(u8, method.name.lexeme, "init")) FunctionType.INITIALIZER else FunctionType.METHOD;
+                    try self.resolveFunction(c, method, declaration);
+                }
+                self.endScope();
+                self.currentClass = enclosingClass;
             },
             .ifStmt => |ifStmt| {
                 try self.resolveExpr(c, ifStmt.condition);

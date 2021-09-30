@@ -1,5 +1,6 @@
 const std = @import("std");
 
+const StringHashMap = std.StringHashMap;
 const ArrayList = std.ArrayList;
 const Allocator = std.mem.Allocator;
 const bufPrint = std.fmt.bufPrint;
@@ -32,11 +33,12 @@ const LoxFunc = expr.LoxFunc;
 const LoxClass = expr.LoxClass;
 const Get = expr.Get;
 const Set = expr.Set;
+const This = expr.This;
 const LoxInstance = expr.LoxInstance;
 const Environment = environment.Environment;
 const Resolver = resolver.Resolver;
 
-const Error = error{ RuntimeError, OutOfMemory, Return } || std.os.WriteError || std.fmt.BufPrintError;
+const Error = error{ RuntimeError, Return } || std.mem.Allocator.Error || std.os.WriteError || std.fmt.BufPrintError;
 
 fn fnClock(interpreter: *Interpreter, arguments: []Value, result: *Value) void {
     _ = interpreter;
@@ -153,7 +155,7 @@ pub const Interpreter = struct {
         }
     }
 
-    fn lookUpVariable(self: *Self, c: anytype, name: Token, exp: *const Variable) Error!Value {
+    fn lookUpVariable(self: *Self, c: anytype, name: Token, exp: *const c_void) Error!Value {
         if (self.locals.get(exp)) |distance| {
             return self.env.getAt(distance, name.lexeme);
         } else {
@@ -298,10 +300,19 @@ pub const Interpreter = struct {
         }
     }
 
+    fn evalThis(self: *Self, c: anytype, exp: *const This) Error!Value {
+        return self.lookUpVariable(c, exp.keyword, exp);
+    }
+
     fn funcArity(callee: Value) u32 {
         return switch (callee) {
             .loxFunc => |*f| @intCast(u32, f.declaration.params.items.len),
-            .loxClass => 0,
+            .loxClass => |f| blk: {
+                if (f.findMethod("init")) |initializer| {
+                    break :blk funcArity(Value{ .loxFunc = initializer });
+                }
+                break :blk 0;
+            },
             .nativeFunc => |*f| f.arity,
             else => 0,
         };
@@ -323,6 +334,10 @@ pub const Interpreter = struct {
         self.execBlock(c, func.declaration.body, env) catch |err| {
             switch (err) {
                 error.Return => {
+                    if (func.isInitializer) {
+                        result.* = func.closure.getAt(0, "this");
+                        return;
+                    }
                     var val = if (c.retVal) |v| v else unreachable;
                     result.* = val.ref(true);
                     c.retVal = null;
@@ -331,6 +346,10 @@ pub const Interpreter = struct {
                 else => return err,
             }
         };
+        if (func.isInitializer) {
+            result.* = func.closure.getAt(0, "this");
+            return;
+        }
         result.* = .nil;
     }
 
@@ -351,9 +370,11 @@ pub const Interpreter = struct {
                 f.call(self, arguments, &result);
             },
             .loxClass => |f| {
-                // var instance = try self.allocator.create(LoxInstance);
-                // instance.* = LoxInstance{ .allocator = self.allocator, .class = f, .refs = 1, .ret = 0 };
-                const instance = try LoxInstance.init(self.allocator, f);
+                var instance = try LoxInstance.init(self.allocator, f);
+                if (f.findMethod("init")) |initializer| {
+                    var func = try initializer.bind(self.allocator, instance);
+                    _ = try self.call(c, tok, Value{ .loxFunc = func }, arguments);
+                }
                 return Value{ .loxInstance = instance };
             },
             else => {
@@ -370,6 +391,7 @@ pub const Interpreter = struct {
             .call => |*e| try self.evalCall(c, e),
             .get => |*e| try self.evalGet(c, e),
             .set => |*e| try self.evalSet(c, e),
+            .this => |*e| try self.evalThis(c, e),
             .logical => |*e| try self.evalLogical(c, e),
             .grouping => |*e| try self.eval(c, e.expression),
             .literal => |*e| e.value,
@@ -396,13 +418,28 @@ pub const Interpreter = struct {
         }
         switch (stm.*) {
             .function => |f| {
-                const function = Value{ .loxFunc = .{ .declaration = f, .closure = self.env.ref(), .ret = 0 } };
+                const function = Value{ .loxFunc = .{
+                    .declaration = f,
+                    .closure = self.env.ref(),
+                    .ret = 0,
+                    .isInitializer = false,
+                } };
                 try self.env.define(f.name.lexeme, function);
             },
             .class => |*s| {
                 try self.env.define(s.name.lexeme, Value{ .nil = {} });
                 var class = try self.funcArena.allocator.create(LoxClass);
-                class.* = .{ .name = s.name.lexeme };
+                var methods = StringHashMap(LoxFunc).init(&self.funcArena.allocator);
+                for (s.methods.items) |method| {
+                    var function = LoxFunc{
+                        .declaration = method,
+                        .closure = self.env,
+                        .ret = 0,
+                        .isInitializer = std.mem.eql(u8, method.name.lexeme, "init"),
+                    };
+                    try methods.put(method.name.lexeme, function);
+                }
+                class.* = .{ .name = s.name.lexeme, .methods = methods };
                 const val = Value{ .loxClass = class };
                 try self.env.assign(c, s.name, val);
             },
@@ -496,6 +533,13 @@ test "interpreter" {
     const Scanner = scanner.Scanner;
     const Parser = parser.Parser;
 
+    // var allocator = std.testing.allocator;
+    // NOTE: At this point I figured out that managing memory by reference
+    // counting was too cumbersome, so I decided to stop freeing memory for
+    // dynamic objects, and approach this in part2 with the garbage collector.
+    var gpa = std.heap.GeneralPurposeAllocator(.{}){};
+    var allocator = &gpa.allocator;
+
     // const src = "var a = 1; var b = 2; print a + b; { var a = 5; print a; } print a; print clock();";
     // const src = "var a = \"foo\"; { var a = \"bar\"; } ";
     // const src = "fun foo(a) { print a + 1; } foo(2);";
@@ -546,26 +590,49 @@ test "interpreter" {
     //     \\
     //     \\print DevonshireCream; // Prints "DevonshireCream".
     // ;
+    // const src =
+    //     \\class Bagel {}
+    //     \\var bagel = Bagel();
+    //     \\var foo = bagel;
+    //     \\print bagel; // Prints "Bagel instance".
+    // ;
+    // const src =
+    //     \\class Bacon {
+    //     \\  eat() {
+    //     \\    print "Crunch crunch crunch!";
+    //     \\  }
+    //     \\}
+    //     \\
+    //     \\Bacon().eat(); // Prints "Crunch crunch crunch!".
+    // ;
     const src =
-        \\class Bagel {}
-        \\var bagel = Bagel();
-        \\var foo = bagel;
-        \\print bagel; // Prints "Bagel instance".
+        \\class Thing {
+        \\  getCallback() {
+        \\    fun localFunction() {
+        \\      print this;
+        \\    }
+        \\
+        \\    return localFunction;
+        \\  }
+        \\}
+        \\
+        \\var callback = Thing().getCallback();
+        \\callback();
     ;
-    var s = try Scanner.init(std.testing.allocator, src);
+    var s = try Scanner.init(allocator, src);
     defer s.deinit();
     var tokens = try s.scanTokens();
 
-    var int = try Interpreter.init(std.testing.allocator);
+    var int = try Interpreter.init(allocator);
     defer int.deinit();
-    var p = try Parser.init(std.testing.allocator, &int.funcArena, tokens);
+    var p = try Parser.init(allocator, &int.funcArena, tokens);
     defer p.deinit();
     var statements = try p.parse();
     // std.debug.print("{s}\n", .{statements});
 
     var w = std.io.getStdErr().writer();
 
-    var res = try Resolver.init(&int, std.testing.allocator);
+    var res = try Resolver.init(&int, allocator);
     defer res.deinit();
     try res.resolve(statements.items);
     try int.interpret(w, statements.items);

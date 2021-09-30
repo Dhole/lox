@@ -33,11 +33,13 @@ pub const Environment = struct {
 
     // Returns true if deinit frees the Environment
     pub fn deinit(self: *Self) bool {
+        // std.debug.print("DBG env.deinit with {d} values\n", .{self.values.count()});
         if (self.refs < 0) {
             @panic("env.deinit oh no");
         }
         var iterator = self.values.iterator();
         while (iterator.next()) |entry| {
+            // std.debug.print("DBG env unref {*}\n", .{entry.value_ptr});
             entry.value_ptr.unref();
         }
         self.refs -= 1;

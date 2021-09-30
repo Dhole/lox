@@ -88,7 +88,7 @@ pub fn Context(comptime Writer: type) type {
             };
         }
 
-        pub fn errSet(self: *Self, tok: Token, comptime fmt: []const u8, args: anytype) !void {
+        pub fn errSet(self: *Self, tok: Token, comptime fmt: []const u8, args: anytype) std.fmt.BufPrintError!void {
             self.err = .{ .tok = undefined, .buf = undefined, .msg = undefined };
             if (self.err) |*err| {
                 err.tok = tok;
