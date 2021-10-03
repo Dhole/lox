@@ -67,11 +67,14 @@ pub const LoxFunc = struct {
 pub const LoxClass = struct {
     const Self = @This();
     name: []const u8,
+    superclass: ?*const LoxClass,
     methods: StringHashMap(LoxFunc),
 
     pub fn findMethod(self: *const Self, name: []const u8) ?LoxFunc {
         if (self.methods.get(name)) |method| {
             return method;
+        } else if (self.superclass) |superclass| {
+            return superclass.findMethod(name);
         } else {
             return null;
         }
@@ -270,6 +273,11 @@ pub const This = struct {
     keyword: Token,
 };
 
+pub const Super = struct {
+    keyword: Token,
+    method: Token,
+};
+
 pub const Expr = union(enum) {
     binary: Binary,
     call: Call,
@@ -279,6 +287,7 @@ pub const Expr = union(enum) {
     logical: Logical,
     set: Set,
     this: This,
+    super: Super,
     unary: Unary,
     variable: Variable,
     assign: Assign,
@@ -358,6 +367,7 @@ pub const RetStmt = struct {
 
 pub const Class = struct {
     name: Token,
+    superclass: ?Variable,
     methods: ArrayList(Function),
 };
 

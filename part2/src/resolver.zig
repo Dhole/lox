@@ -29,6 +29,7 @@ pub const FunctionType = enum {
 pub const ClassType = enum {
     NONE,
     CLASS,
+    SUBCLASS,
 };
 
 pub const Resolver = struct {
@@ -155,6 +156,16 @@ pub const Resolver = struct {
                 }
                 try self.resolveLocal(e, e.keyword);
             },
+            .super => |*e| {
+                if (self.currentClass == ClassType.NONE) {
+                    try c.errSet(e.keyword, "Can't use 'super' outside of a class.", .{});
+                    return error.ResolveError;
+                } else if (self.currentClass != ClassType.SUBCLASS) {
+                    try c.errSet(e.keyword, "Can't use 'super' in a class with no superclass.", .{});
+                    return error.ResolveError;
+                }
+                try self.resolveLocal(e, e.keyword);
+            },
             .grouping => |*e| {
                 try self.resolveExpr(c, e.expression);
             },
@@ -226,6 +237,19 @@ pub const Resolver = struct {
                 try self.declare(c, s.name);
                 try self.define(s.name);
 
+                if (s.superclass) |superclass| {
+                    self.currentClass = ClassType.SUBCLASS;
+                    if (std.mem.eql(u8, s.name.lexeme, superclass.name.lexeme)) {
+                        try c.errSet(superclass.name, "A class can't inherit from itself.", .{});
+                        return error.ResolveError;
+                    }
+                    var exp = Expr{ .variable = superclass };
+                    try self.resolveExpr(c, &exp);
+
+                    try self.beginScope();
+                    try self.scopesPeek().put("super", true);
+                }
+
                 try self.beginScope();
                 try self.scopesPeek().put("this", true);
                 for (s.methods.items) |*method| {
@@ -233,6 +257,9 @@ pub const Resolver = struct {
                     try self.resolveFunction(c, method, declaration);
                 }
                 self.endScope();
+                if (s.superclass) |_| {
+                    self.endScope();
+                }
                 self.currentClass = enclosingClass;
             },
             .ifStmt => |ifStmt| {

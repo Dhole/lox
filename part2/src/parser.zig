@@ -16,6 +16,7 @@ const Unary = expr.Unary;
 const Expr = expr.Expr;
 const Stmt = expr.Stmt;
 const Var = expr.Var;
+const Variable = expr.Variable;
 const Function = expr.Function;
 
 pub const Parser = struct {
@@ -132,13 +133,18 @@ pub const Parser = struct {
 
     fn classDeclaration(self: *Self) !Stmt {
         const name = try self.consume(TT.IDENTIFIER, "Expect class name.");
+        var superclass: ?Variable = null;
+        if (self.match(&.{TT.LESS})) {
+            const superclassName = try self.consume(TT.IDENTIFIER, "Expect superclass name.");
+            superclass = Variable{ .name = superclassName };
+        }
         _ = try self.consume(TT.LEFT_BRACE, "Expect '{' before class body.");
         var methods = ArrayList(Function).init(&self.arena.allocator);
         while (!self.check(TT.RIGHT_BRACE) and !self.isAtEnd()) {
             try methods.append((try self.function(FunctionKind.method)).function);
         }
         _ = try self.consume(TT.RIGHT_BRACE, "Expect '}' after class body.");
-        return Stmt{ .class = .{ .name = name, .methods = methods } };
+        return Stmt{ .class = .{ .name = name, .superclass = superclass, .methods = methods } };
     }
 
     fn statement(self: *Self) Error!Stmt {
@@ -463,6 +469,13 @@ pub const Parser = struct {
             } else {
                 unreachable;
             }
+        }
+        if (self.match(&.{TT.SUPER})) {
+            var keyword = try self.previous();
+            _ = try self.consume(TT.DOT, "Expect '.' after 'super'.");
+            const method = try self.consume(TT.IDENTIFIER, "Expect superclass method name.");
+            exp.* = .{ .super = .{ .keyword = keyword, .method = method } };
+            return exp;
         }
         if (self.match(&.{TT.THIS})) {
             exp.* = .{ .this = .{ .keyword = try self.previous() } };

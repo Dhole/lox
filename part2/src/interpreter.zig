@@ -34,6 +34,7 @@ const LoxClass = expr.LoxClass;
 const Get = expr.Get;
 const Set = expr.Set;
 const This = expr.This;
+const Super = expr.Super;
 const LoxInstance = expr.LoxInstance;
 const Environment = environment.Environment;
 const Resolver = resolver.Resolver;
@@ -304,6 +305,24 @@ pub const Interpreter = struct {
         return self.lookUpVariable(c, exp.keyword, exp);
     }
 
+    fn evalSuper(self: *Self, c: anytype, exp: *const Super) Error!Value {
+        const distance = self.locals.get(exp).?;
+        var superclass = switch (self.env.getAt(distance, "super")) {
+            .loxClass => |sc| sc,
+            else => @panic("unexpected value type at 'super'"),
+        };
+        var object = switch (self.env.getAt(distance - 1, "this")) {
+            .loxInstance => |in| in,
+            else => @panic("unexpected value type at 'this'"),
+        };
+        if (superclass.findMethod(exp.method.lexeme)) |method| {
+            return Value{ .loxFunc = try method.bind(self.allocator, object) };
+        } else {
+            try c.errSet(exp.method, "Undefined property {s}.", .{exp.method.lexeme});
+            return error.RuntimeError;
+        }
+    }
+
     fn funcArity(callee: Value) u32 {
         return switch (callee) {
             .loxFunc => |*f| @intCast(u32, f.declaration.params.items.len),
@@ -392,6 +411,7 @@ pub const Interpreter = struct {
             .get => |*e| try self.evalGet(c, e),
             .set => |*e| try self.evalSet(c, e),
             .this => |*e| try self.evalThis(c, e),
+            .super => |*e| try self.evalSuper(c, e),
             .logical => |*e| try self.evalLogical(c, e),
             .grouping => |*e| try self.eval(c, e.expression),
             .literal => |*e| e.value,
@@ -427,8 +447,36 @@ pub const Interpreter = struct {
                 try self.env.define(f.name.lexeme, function);
             },
             .class => |*s| {
+                var superclass: ?*LoxClass = null;
+                if (s.superclass) |sc| {
+                    var exp = Expr{ .variable = sc };
+                    var _superclass = try self.eval(c, &exp);
+                    switch (_superclass) {
+                        .loxClass => |cl| {
+                            superclass = cl;
+                        },
+                        else => {
+                            try c.errSet(sc.name, "Superclass must be a class.", .{});
+                            return error.RuntimeError;
+                        },
+                    }
+                }
+
                 try self.env.define(s.name.lexeme, Value{ .nil = {} });
-                var class = try self.funcArena.allocator.create(LoxClass);
+
+                if (superclass) |sc| {
+                    var env = try self.allocator.create(Environment);
+                    env.* = Environment.init(self.allocator, self.env);
+                    // defer {
+                    //     if (env.deinit()) {
+                    //         // std.debug.print("DBG int.destroy env{*}\n", .{env});
+                    //         self.allocator.destroy(env);
+                    //     }
+                    // }
+                    self.env = env;
+                    try self.env.define("super", Value{ .loxClass = sc });
+                }
+
                 var methods = StringHashMap(LoxFunc).init(&self.funcArena.allocator);
                 for (s.methods.items) |method| {
                     var function = LoxFunc{
@@ -439,8 +487,12 @@ pub const Interpreter = struct {
                     };
                     try methods.put(method.name.lexeme, function);
                 }
-                class.* = .{ .name = s.name.lexeme, .methods = methods };
+                var class = try self.funcArena.allocator.create(LoxClass);
+                class.* = .{ .name = s.name.lexeme, .superclass = superclass, .methods = methods };
                 const val = Value{ .loxClass = class };
+                if (superclass) |_| {
+                    self.env = self.env.enclosing.?;
+                }
                 try self.env.assign(c, s.name, val);
             },
             .expression => |e| {
@@ -605,19 +657,51 @@ test "interpreter" {
     //     \\
     //     \\Bacon().eat(); // Prints "Crunch crunch crunch!".
     // ;
+    // const src =
+    //     \\class Thing {
+    //     \\  getCallback() {
+    //     \\    fun localFunction() {
+    //     \\      print this;
+    //     \\    }
+    //     \\
+    //     \\    return localFunction;
+    //     \\  }
+    //     \\}
+    //     \\
+    //     \\var callback = Thing().getCallback();
+    //     \\callback();
+    // ;
+    // const src =
+    //     \\class Doughnut {
+    //     \\  cook() {
+    //     \\    print "Fry until golden brown.";
+    //     \\  }
+    //     \\}
+    //     \\
+    //     \\class BostonCream < Doughnut {}
+    //     \\
+    //     \\BostonCream().cook();
+    // ;
     const src =
-        \\class Thing {
-        \\  getCallback() {
-        \\    fun localFunction() {
-        \\      print this;
-        \\    }
-        \\
-        \\    return localFunction;
+        \\class A {
+        \\  method() {
+        \\    print "A method";
         \\  }
         \\}
         \\
-        \\var callback = Thing().getCallback();
-        \\callback();
+        \\class B < A {
+        \\  method() {
+        \\    print "B method";
+        \\  }
+        \\
+        \\  test() {
+        \\    super.method();
+        \\  }
+        \\}
+        \\
+        \\class C < B {}
+        \\
+        \\C().test();
     ;
     var s = try Scanner.init(allocator, src);
     defer s.deinit();
