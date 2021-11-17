@@ -1,11 +1,11 @@
-const memory = @import("memory.zig");
-const value = @import("value.zig");
+const _memory = @import("memory.zig");
+const _value = @import("value.zig");
 
-const growCapacity = memory.growCapacity;
-const growArray = memory.growArray;
-const freeArray = memory.freeArray;
-const ValueArray = value.ValueArray;
-const Value = value.Value;
+const growCapacity = _memory.growCapacity;
+const growArray = _memory.growArray;
+const freeArray = _memory.freeArray;
+const ValueArray = _value.ValueArray;
+const Value = _value.Value;
 
 pub const OpCode = enum(u8) {
     OP_RETURN,

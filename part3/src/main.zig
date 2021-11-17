@@ -1,18 +1,37 @@
-const std = @import("std");
+const _common = @import("common.zig");
+const _chunk = @import("chunk.zig");
+const _debug = @import("debug.zig");
+const _vm = @import("vm.zig");
 
-const common = @import("common.zig");
-const chunk = @import("chunk.zig");
-const debug = @import("debug.zig");
+const Chunk = _chunk.Chunk;
+const VM = _vm.VM;
+const disassembleChunk = _debug.disassembleChunk;
 
-const OpCode = common.OpCode;
+const OpCode = _common.OpCode;
 
 pub fn main() anyerror!void {
-    std.log.info("All your codebase are belong to us.", .{});
-    var ch = chunk.Chunk.init();
-    const constant = ch.addConstant(1.2);
-    ch.write(@enumToInt(OpCode.OP_CONSTANT), 123);
-    ch.write(@intCast(u8, constant), 123);
-    ch.write(@enumToInt(OpCode.OP_RETURN), 123);
-    debug.disassembleChunk(&ch, "test chunk");
-    ch.deinit();
+    var vm = VM(true).init();
+    var chunk = Chunk.init();
+    var constant = chunk.addConstant(1.2);
+    chunk.write(@enumToInt(OpCode.OP_CONSTANT), 123);
+    chunk.write(@intCast(u8, constant), 123);
+
+    constant = chunk.addConstant(3.4);
+    chunk.write(@enumToInt(OpCode.OP_CONSTANT), 123);
+    chunk.write(@intCast(u8, constant), 123);
+
+    chunk.write(@enumToInt(OpCode.OP_ADD), 123);
+
+    constant = chunk.addConstant(5.6);
+    chunk.write(@enumToInt(OpCode.OP_CONSTANT), 123);
+    chunk.write(@intCast(u8, constant), 123);
+
+    chunk.write(@enumToInt(OpCode.OP_DIVIDE), 123);
+    chunk.write(@enumToInt(OpCode.OP_NEGATE), 123);
+
+    chunk.write(@enumToInt(OpCode.OP_RETURN), 123);
+    // disassembleChunk(&chunk, "test chunk");
+    _ = vm.interpret(&chunk);
+    vm.deinit();
+    chunk.deinit();
 }

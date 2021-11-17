@@ -1,10 +1,10 @@
 const std = @import("std");
 
-const memory = @import("memory.zig");
+const _memory = @import("memory.zig");
 
-const growCapacity = memory.growCapacity;
-const growArray = memory.growArray;
-const freeArray = memory.freeArray;
+const growCapacity = _memory.growCapacity;
+const growArray = _memory.growArray;
+const freeArray = _memory.freeArray;
 const print = std.debug.print;
 
 pub const Value = f64;
