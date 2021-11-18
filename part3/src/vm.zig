@@ -61,10 +61,9 @@ pub fn VM(comptime debug: bool) type {
             return self.chunk.code[self.pc];
         }
 
-        pub fn interpret(self: *Self, chunk: *Chunk) InterpretResult {
-            self.chunk = chunk;
-            self.pc = 0;
-            return self.run();
+        pub fn interpret(self: *Self, source: []const u8) InterpretResult {
+            self.compile(source);
+            return INTERPRET_OK;
         }
 
         fn run(self: *Self) InterpretResult {
