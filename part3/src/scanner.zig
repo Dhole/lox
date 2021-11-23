@@ -1,3 +1,5 @@
+const std = @import("std");
+
 const _token = @import("token.zig");
 
 const Token = _token.Token;
@@ -28,14 +30,14 @@ pub const Scanner = struct {
                     _ = self.advance();
                 },
                 '\n' => {
-                    scanner.line += 1;
+                    self.line += 1;
                     _ = self.advance();
                 },
                 '/' => {
                     if (self.peekNext() == '/') {
                         // A comment goes until the end of the line.
-                        while (peek() != '\n' and !isAtEnd()) {
-                            selfadvance();
+                        while (self.peek() != '\n' and !self.isAtEnd()) {
+                            _ = self.advance();
                         }
                     } else {
                         return;
@@ -50,33 +52,34 @@ pub const Scanner = struct {
         self.skipWhitespace();
         self.start = self.current;
         if (self.isAtEnd()) {
-            return self.makeToken(TT.TOKEN_EOF);
+            return self.makeToken(TT.EOF);
         }
         const c = self.advance();
-        if (self.isDigit(c)) {
+        if (isDigit(c)) {
             return self.number();
         }
-        if (self.isAlpha(c)) {
+        if (isAlpha(c)) {
             return self.identifier();
         }
 
         switch (c) {
-            '(' => return self.makeToken(TT.TOKEN_LEFT_PAREN),
-            ')' => return self.makeToken(TT.TOKEN_RIGHT_PAREN),
-            '{' => return self.makeToken(TT.TOKEN_LEFT_BRACE),
-            '}' => return self.makeToken(TT.TOKEN_RIGHT_BRACE),
-            ';' => return self.makeToken(TT.TOKEN_SEMICOLON),
-            ',' => return self.makeToken(TT.TOKEN_COMMA),
-            '.' => return self.makeToken(TT.TOKEN_DOT),
-            '-' => return self.makeToken(TT.TOKEN_MINUS),
-            '+' => return self.makeToken(TT.TOKEN_PLUS),
-            '/' => return self.makeToken(TT.TOKEN_SLASH),
-            '*' => return self.makeToken(TT.TOKEN_STAR),
-            '!' => return self.makeToken(if (self.match('=')) TT.TOKEN_BANG_EQUAL else TT.TOKEN_BANG),
-            '=' => return self.makeToken(if (self.match('=')) TT.TOKEN_EQUAL_EQUAL else TT.TOKEN_EQUAL),
-            '<' => return self.makeToken(if (self.match('=')) TT.TOKEN_LESS_EQUAL else TT.TOKEN_LESS),
-            '>' => return self.makeToken(if (self.match('=')) TT.TOKEN_GREATER_EQUAL else TT.TOKEN_GREATER),
+            '(' => return self.makeToken(TT.LEFT_PAREN),
+            ')' => return self.makeToken(TT.RIGHT_PAREN),
+            '{' => return self.makeToken(TT.LEFT_BRACE),
+            '}' => return self.makeToken(TT.RIGHT_BRACE),
+            ';' => return self.makeToken(TT.SEMICOLON),
+            ',' => return self.makeToken(TT.COMMA),
+            '.' => return self.makeToken(TT.DOT),
+            '-' => return self.makeToken(TT.MINUS),
+            '+' => return self.makeToken(TT.PLUS),
+            '/' => return self.makeToken(TT.SLASH),
+            '*' => return self.makeToken(TT.STAR),
+            '!' => return self.makeToken(if (self.match('=')) TT.BANG_EQUAL else TT.BANG),
+            '=' => return self.makeToken(if (self.match('=')) TT.EQUAL_EQUAL else TT.EQUAL),
+            '<' => return self.makeToken(if (self.match('=')) TT.LESS_EQUAL else TT.LESS),
+            '>' => return self.makeToken(if (self.match('=')) TT.GREATER_EQUAL else TT.GREATER),
             '"' => return self.string(),
+            else => {},
         }
 
         return self.errorToken("Unexpected character.");
@@ -85,7 +88,7 @@ pub const Scanner = struct {
     fn string(self: *Self) Token {
         while (self.peek() != '"' and !self.isAtEnd()) {
             if (self.peek() == '\n') {
-                scanner.line += 1;
+                self.line += 1;
             }
             _ = self.advance();
         }
@@ -95,72 +98,74 @@ pub const Scanner = struct {
         // The closing quote
         _ = self.advance();
 
-        return self.makeToken(TT.TOKEN_STRING);
+        return self.makeToken(TT.STRING);
     }
 
     fn number(self: *Self) Token {
-        while (self.isDigit(self.peek())) {
+        while (isDigit(self.peek())) {
             _ = self.advance();
         }
         // Look for a fractional part.
-        if (self.peek() == '.' and self.isDigit(self.peekNext())) {
+        if (self.peek() == '.' and isDigit(self.peekNext())) {
             // Consume the ".".
             _ = self.advance();
 
-            while (self.isDigit(self.peek())) {
+            while (isDigit(self.peek())) {
                 _ = self.advance();
             }
         }
-        return self.makeToken(TT.TOKEN_NUMBER);
+        return self.makeToken(TT.NUMBER);
     }
 
     fn identifier(self: *Self) Token {
-        while (self.isAlpha(self.peek()) or self.isDigit(self.peek())) {
+        while (isAlpha(self.peek()) or isDigit(self.peek())) {
             _ = self.advance();
         }
         return self.makeToken(self.identifierType());
     }
 
-    fn identifierType(self: *Self) TokenType {
+    fn identifierType(self: *Self) TT {
         switch (self.source[self.start]) {
-            'a' => return self.checkKeyword(1, "nd", TT.TOKEN_AND),
-            'c' => return self.checkKeyword(1, "lass", TT.TOKEN_CLASS),
-            'e' => return self.checkKeyword(1, "lse", TT.TOKEN_ELSE),
+            'a' => return self.checkKeyword(1, "nd", TT.AND),
+            'c' => return self.checkKeyword(1, "lass", TT.CLASS),
+            'e' => return self.checkKeyword(1, "lse", TT.ELSE),
             'f' => {
                 if (self.current - self.start > 1) {
                     switch (self.source[self.start + 1]) {
-                        'a' => return checkKeyword(2, "lse", TOKEN_FALSE),
-                        'o' => return checkKeyword(2, "r", TOKEN_FOR),
-                        'u' => return checkKeyword(2, "n", TOKEN_FUN),
+                        'a' => return self.checkKeyword(2, "lse", TT.FALSE),
+                        'o' => return self.checkKeyword(2, "r", TT.FOR),
+                        'u' => return self.checkKeyword(2, "n", TT.FUN),
+                        else => {},
                     }
                 }
             },
-            'i' => return self.checkKeyword(1, "f", TT.TOKEN_IF),
-            'n' => return self.checkKeyword(1, "il", TT.TOKEN_NIL),
-            'o' => return self.checkKeyword(1, "r", TT.TOKEN_OR),
-            'p' => return self.checkKeyword(1, "rint", TT.TOKEN_PRINT),
-            'r' => return self.checkKeyword(1, "eturn", TT.TOKEN_RETURN),
-            's' => return self.checkKeyword(1, "uper", TT.TOKEN_SUPER),
+            'i' => return self.checkKeyword(1, "f", TT.IF),
+            'n' => return self.checkKeyword(1, "il", TT.NIL),
+            'o' => return self.checkKeyword(1, "r", TT.OR),
+            'p' => return self.checkKeyword(1, "rint", TT.PRINT),
+            'r' => return self.checkKeyword(1, "eturn", TT.RETURN),
+            's' => return self.checkKeyword(1, "uper", TT.SUPER),
             't' => {
                 if (self.current - self.start > 1) {
                     switch (self.source[self.start + 1]) {
-                        'h' => return checkKeyword(2, "is", TT.TOKEN_THIS),
-                        'r' => return checkKeyword(2, "ue", TT.TOKEN_TRUE),
+                        'h' => return self.checkKeyword(2, "is", TT.THIS),
+                        'r' => return self.checkKeyword(2, "ue", TT.TRUE),
+                        else => {},
                     }
                 }
             },
-            'v' => return self.checkKeyword(1, "ar", TT.TOKEN_VAR),
-            'w' => return self.checkKeyword(1, "hile", TT.TOKEN_WHILE),
+            'v' => return self.checkKeyword(1, "ar", TT.VAR),
+            'w' => return self.checkKeyword(1, "hile", TT.WHILE),
             else => {},
         }
-        return TT.TOKEN_IDENTIFIER;
+        return TT.IDENTIFIER;
     }
 
-    fn checkKeyword(self: *Self, start: usize, rest: []const u8, typ: TokenType) TokenType {
-        if (self.source[self.start .. self.start + rest.len] == rest) {
+    fn checkKeyword(self: *Self, start: usize, rest: []const u8, typ: TT) TT {
+        if (std.mem.eql(u8, self.source[self.start + start .. self.start + start + rest.len], rest)) {
             return typ;
         }
-        return TOKEN_IDENTIFIER;
+        return TT.IDENTIFIER;
     }
 
     fn isDigit(c: u8) bool {
@@ -174,7 +179,7 @@ pub const Scanner = struct {
     }
 
     fn isAtEnd(self: *Self) bool {
-        return self.source[self.current] == '\0';
+        return self.current == self.source.len;
     }
 
     fn advance(self: *Self) u8 {
@@ -183,12 +188,15 @@ pub const Scanner = struct {
     }
 
     fn peek(self: *Self) u8 {
+        if (self.isAtEnd()) {
+            return 0;
+        }
         return self.source[self.current];
     }
 
     fn peekNext(self: *Self) u8 {
-        if (self.isAtEnd()) {
-            return '\0';
+        if (self.isAtEnd() or self.current + 1 == self.source.len) {
+            return 0;
         }
         return self.source[self.current + 1];
     }
@@ -204,7 +212,7 @@ pub const Scanner = struct {
         return true;
     }
 
-    fn makeToken(self: *Self, typ: TokenType) Token {
+    fn makeToken(self: *Self, typ: TT) Token {
         return Token{
             .type = typ,
             .value = self.source[self.start..self.current],
@@ -216,7 +224,7 @@ pub const Scanner = struct {
 
     fn errorToken(self: *Self, message: []const u8) Token {
         return Token{
-            .type = TT.TOKEN_ERROR,
+            .type = TT.ERROR,
             .value = message,
             .line = self.line,
         };

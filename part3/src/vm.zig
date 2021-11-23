@@ -4,6 +4,7 @@ const _chunk = @import("chunk.zig");
 const _common = @import("common.zig");
 const _value = @import("value.zig");
 const _debug = @import("debug.zig");
+const _compiler = @import("compiler.zig");
 
 const print = std.debug.print;
 
@@ -12,6 +13,7 @@ const OpCode = _common.OpCode;
 const Value = _value.Value;
 const printValue = _value.printValue;
 const disassembleInstruction = _debug.disassembleInstruction;
+const compile = _compiler.compile;
 
 pub const InterpretResult = enum {
     OK,
@@ -62,8 +64,9 @@ pub fn VM(comptime debug: bool) type {
         }
 
         pub fn interpret(self: *Self, source: []const u8) InterpretResult {
-            self.compile(source);
-            return INTERPRET_OK;
+            _ = self;
+            compile(source);
+            return InterpretResult.OK;
         }
 
         fn run(self: *Self) InterpretResult {
