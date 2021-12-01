@@ -10,6 +10,7 @@ const VM = _vm.VM;
 const InterpretResult = _vm.InterpretResult;
 const disassembleChunk = _debug.disassembleChunk;
 const OpCode = _common.OpCode;
+const Flags = _common.Flags;
 
 const MAX_FILE_SIZE = 0x1000000;
 
@@ -17,18 +18,18 @@ var gpa = std.heap.GeneralPurposeAllocator(.{}){};
 var allocator = &gpa.allocator;
 
 pub fn main() anyerror!u8 {
-    const debug = true;
-    var vm = VM(debug).init();
+    const flags = Flags{ .debugTraceExecution = true, .debugPrintCode = true };
+    var vm = VM(flags).init();
 
     const args = std.os.argv[1..std.os.argv.len];
     if (args.len == 0) {
         return try repl(
-            debug,
+            flags,
             &vm,
         );
     } else if (args.len == 1) {
         const arg0 = std.mem.sliceTo(args[0], '0');
-        return try runFile(debug, &vm, arg0);
+        return try runFile(flags, &vm, arg0);
     } else {
         std.log.err("Usage: clox [path]", .{});
         return 64;
@@ -38,7 +39,7 @@ pub fn main() anyerror!u8 {
     return 0;
 }
 
-fn repl(comptime debug: bool, vm: *VM(debug)) !u8 {
+fn repl(comptime flags: Flags, vm: *VM(flags)) !u8 {
     const stdout = std.io.getStdOut();
     const stdin = std.io.getStdIn();
     const reader = std.io.bufferedReader(stdin.reader()).reader();
@@ -55,7 +56,7 @@ fn repl(comptime debug: bool, vm: *VM(debug)) !u8 {
     }
 }
 
-fn runFile(comptime debug: bool, vm: *VM(debug), path: []const u8) !u8 {
+fn runFile(comptime flags: Flags, vm: *VM(flags), path: []const u8) !u8 {
     var file = try std.fs.cwd().openFile(path, .{ .read = true });
     const source = try file.readToEndAlloc(allocator, MAX_FILE_SIZE);
     defer allocator.free(source);

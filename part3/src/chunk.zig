@@ -7,10 +7,6 @@ const freeArray = _memory.freeArray;
 const ValueArray = _value.ValueArray;
 const Value = _value.Value;
 
-pub const OpCode = enum(u8) {
-    OP_RETURN,
-};
-
 pub const Chunk = struct {
     const Self = @This();
 

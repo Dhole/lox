@@ -29,13 +29,13 @@ pub fn disassembleInstruction(chunk: *Chunk, offset: usize) usize {
 
     const instruction = chunk.code[offset];
     return switch (instruction) {
-        @enumToInt(OpCode.OP_RETURN) => simpleInstruction("OP_RETURN", offset),
-        @enumToInt(OpCode.OP_CONSTANT) => constantInstruction("OP_CONSTANT", chunk, offset),
-        @enumToInt(OpCode.OP_NEGATE) => simpleInstruction("OP_NEGATE", offset),
-        @enumToInt(OpCode.OP_ADD) => simpleInstruction("OP_ADD", offset),
-        @enumToInt(OpCode.OP_SUBTRACT) => simpleInstruction("OP_SUBTRACT", offset),
-        @enumToInt(OpCode.OP_MULTIPLY) => simpleInstruction("OP_MULTIPLY", offset),
-        @enumToInt(OpCode.OP_DIVIDE) => simpleInstruction("OP_DIVIDE", offset),
+        @enumToInt(OpCode.RETURN) => simpleInstruction("OP_RETURN", offset),
+        @enumToInt(OpCode.CONSTANT) => constantInstruction("OP_CONSTANT", chunk, offset),
+        @enumToInt(OpCode.NEGATE) => simpleInstruction("OP_NEGATE", offset),
+        @enumToInt(OpCode.ADD) => simpleInstruction("OP_ADD", offset),
+        @enumToInt(OpCode.SUBTRACT) => simpleInstruction("OP_SUBTRACT", offset),
+        @enumToInt(OpCode.MULTIPLY) => simpleInstruction("OP_MULTIPLY", offset),
+        @enumToInt(OpCode.DIVIDE) => simpleInstruction("OP_DIVIDE", offset),
         else => blk: {
             print("Unknown opcode {x:0>2}\n", .{instruction});
             break :blk offset + 1;

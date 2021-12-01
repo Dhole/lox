@@ -1,9 +1,14 @@
 pub const OpCode = enum {
-    OP_CONSTANT,
-    OP_ADD,
-    OP_SUBTRACT,
-    OP_MULTIPLY,
-    OP_DIVIDE,
-    OP_NEGATE,
-    OP_RETURN,
+    CONSTANT,
+    ADD,
+    SUBTRACT,
+    MULTIPLY,
+    DIVIDE,
+    NEGATE,
+    RETURN,
+};
+
+pub const Flags = struct {
+    debugTraceExecution: bool,
+    debugPrintCode: bool,
 };

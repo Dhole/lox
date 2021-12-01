@@ -13,7 +13,8 @@ const OpCode = _common.OpCode;
 const Value = _value.Value;
 const printValue = _value.printValue;
 const disassembleInstruction = _debug.disassembleInstruction;
-const compile = _compiler.compile;
+const Parser = _compiler.Parser;
+const Flags = _common.Flags;
 
 pub const InterpretResult = enum {
     OK,
@@ -23,7 +24,7 @@ pub const InterpretResult = enum {
 
 pub const STACK_MAX: usize = 256;
 
-pub fn VM(comptime debug: bool) type {
+pub fn VM(comptime flags: Flags) type {
     return struct {
         const Self = @This();
 
@@ -64,14 +65,22 @@ pub fn VM(comptime debug: bool) type {
         }
 
         pub fn interpret(self: *Self, source: []const u8) InterpretResult {
-            _ = self;
-            compile(source);
-            return InterpretResult.OK;
+            var chunk = Chunk.init();
+            var parser = Parser(flags).init();
+            defer chunk.deinit();
+            if (!parser.compile(source, &chunk)) {
+                return InterpretResult.COMPILE_ERROR;
+            }
+            self.chunk = &chunk;
+            self.pc = 0;
+
+            const result = self.run();
+            return result;
         }
 
         fn run(self: *Self) InterpretResult {
             while (true) {
-                if (debug) {
+                if (flags.debugTraceExecution) {
                     print("          ", .{});
                     var i: usize = 0;
                     while (i < self.stackTop) : (i += 1) {
@@ -85,16 +94,16 @@ pub fn VM(comptime debug: bool) type {
 
                 const instruction = self.readByte();
                 switch (instruction) {
-                    @enumToInt(OpCode.OP_CONSTANT) => {
+                    @enumToInt(OpCode.CONSTANT) => {
                         const constant = self.readConstant();
                         self.push(constant);
                     },
-                    @enumToInt(OpCode.OP_NEGATE) => self.push(-self.pop()),
-                    @enumToInt(OpCode.OP_ADD) => self.binaryOp(add),
-                    @enumToInt(OpCode.OP_SUBTRACT) => self.binaryOp(sub),
-                    @enumToInt(OpCode.OP_MULTIPLY) => self.binaryOp(mul),
-                    @enumToInt(OpCode.OP_DIVIDE) => self.binaryOp(div),
-                    @enumToInt(OpCode.OP_RETURN) => {
+                    @enumToInt(OpCode.NEGATE) => self.push(-self.pop()),
+                    @enumToInt(OpCode.ADD) => self.binaryOp(add),
+                    @enumToInt(OpCode.SUBTRACT) => self.binaryOp(sub),
+                    @enumToInt(OpCode.MULTIPLY) => self.binaryOp(mul),
+                    @enumToInt(OpCode.DIVIDE) => self.binaryOp(div),
+                    @enumToInt(OpCode.RETURN) => {
                         printValue(self.pop());
                         print("\n", .{});
                         return InterpretResult.OK;
