@@ -161,7 +161,7 @@ pub fn Parser(comptime flags: Flags) type {
             const value = std.fmt.parseFloat(f64, self.previous.value) catch |e| {
                 std.debug.panic("{}", .{e});
             };
-            _ = self.emitConstant(value);
+            _ = self.emitConstant(.{ .number = value });
         }
 
         fn unary(self: *Self) void {

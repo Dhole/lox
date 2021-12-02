@@ -7,10 +7,46 @@ const growArray = _memory.growArray;
 const freeArray = _memory.freeArray;
 const print = std.debug.print;
 
-pub const Value = f64;
+pub const ValueType = enum {
+    boolean,
+    nil,
+    number,
+};
+
+pub const Value = union(ValueType) {
+    const Self = @This();
+
+    boolean: bool,
+    number: f64,
+    nil: void,
+
+    pub fn initBool(value: bool) Self {
+        return Self{ .boolean = value };
+    }
+
+    pub fn initNumber(value: f64) Self {
+        return Self{ .number = value };
+    }
+
+    pub fn initNil() Self {
+        return Self.nil;
+    }
+
+    fn isBool(self: *Self) bool {
+        return @as(ValueTYpe, self) == ValueType.boolean;
+    }
+
+    fn isNumber(self: *Self) bool {
+        return @as(ValueTYpe, self) == ValueType.number;
+    }
+
+    fn isNil(self: *Self) bool {
+        return @as(ValueTYpe, self) == ValueType.nil;
+    }
+};
 
 pub fn printValue(val: Value) void {
-    print("\'{d}\'", .{val});
+    print("\'{d}\'", .{val.number});
 }
 
 pub const ValueArray = struct {
