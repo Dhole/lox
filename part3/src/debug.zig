@@ -31,11 +31,18 @@ pub fn disassembleInstruction(chunk: *Chunk, offset: usize) usize {
     return switch (instruction) {
         @enumToInt(OpCode.RETURN) => simpleInstruction("OP_RETURN", offset),
         @enumToInt(OpCode.CONSTANT) => constantInstruction("OP_CONSTANT", chunk, offset),
+        @enumToInt(OpCode.NIL) => simpleInstruction("OP_NIL", offset),
+        @enumToInt(OpCode.TRUE) => simpleInstruction("OP_TRUE", offset),
+        @enumToInt(OpCode.FALSE) => simpleInstruction("OP_FALSE", offset),
+        @enumToInt(OpCode.EQUAL) => simpleInstruction("OP_EQUAL", offset),
+        @enumToInt(OpCode.GREATER) => simpleInstruction("OP_GREATER", offset),
+        @enumToInt(OpCode.LESS) => simpleInstruction("OP_LESS", offset),
         @enumToInt(OpCode.NEGATE) => simpleInstruction("OP_NEGATE", offset),
         @enumToInt(OpCode.ADD) => simpleInstruction("OP_ADD", offset),
         @enumToInt(OpCode.SUBTRACT) => simpleInstruction("OP_SUBTRACT", offset),
         @enumToInt(OpCode.MULTIPLY) => simpleInstruction("OP_MULTIPLY", offset),
         @enumToInt(OpCode.DIVIDE) => simpleInstruction("OP_DIVIDE", offset),
+        @enumToInt(OpCode.NOT) => simpleInstruction("OP_NOT", offset),
         else => blk: {
             print("Unknown opcode {x:0>2}\n", .{instruction});
             break :blk offset + 1;

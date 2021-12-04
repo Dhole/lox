@@ -109,6 +109,16 @@ pub fn VM(comptime flags: Flags) type {
                         const constant = self.readConstant();
                         self.push(constant);
                     },
+                    @enumToInt(OpCode.NIL) => self.push(.nil),
+                    @enumToInt(OpCode.TRUE) => self.push(.{ .boolean = true }),
+                    @enumToInt(OpCode.FALSE) => self.push(.{ .boolean = false }),
+                    @enumToInt(OpCode.EQUAL) => {
+                        const b = self.pop();
+                        const a = self.pop();
+                        self.push(.{ .boolean = a.equals(b) });
+                    },
+                    @enumToInt(OpCode.GREATER) => try self.binaryOp(f64, bool, Value.initBool, greater),
+                    @enumToInt(OpCode.LESS) => try self.binaryOp(f64, bool, Value.initBool, less),
                     @enumToInt(OpCode.NEGATE) => {
                         switch (self.peek(0)) {
                             ValueType.number => |v| {
@@ -121,10 +131,11 @@ pub fn VM(comptime flags: Flags) type {
                             },
                         }
                     },
-                    @enumToInt(OpCode.ADD) => try self.binaryOp(f64, Value.initNumber, add),
-                    @enumToInt(OpCode.SUBTRACT) => try self.binaryOp(f64, Value.initNumber, sub),
-                    @enumToInt(OpCode.MULTIPLY) => try self.binaryOp(f64, Value.initNumber, mul),
-                    @enumToInt(OpCode.DIVIDE) => try self.binaryOp(f64, Value.initNumber, div),
+                    @enumToInt(OpCode.ADD) => try self.binaryOp(f64, f64, Value.initNumber, add),
+                    @enumToInt(OpCode.SUBTRACT) => try self.binaryOp(f64, f64, Value.initNumber, sub),
+                    @enumToInt(OpCode.MULTIPLY) => try self.binaryOp(f64, f64, Value.initNumber, mul),
+                    @enumToInt(OpCode.DIVIDE) => try self.binaryOp(f64, f64, Value.initNumber, div),
+                    @enumToInt(OpCode.NOT) => self.push(.{ .boolean = isFalsey(self.pop()) }),
                     @enumToInt(OpCode.RETURN) => {
                         printValue(self.pop());
                         print("\n", .{});
@@ -149,12 +160,19 @@ pub fn VM(comptime flags: Flags) type {
         fn div(a: f64, b: f64) f64 {
             return a / b;
         }
+        fn greater(a: f64, b: f64) bool {
+            return a > b;
+        }
+        fn less(a: f64, b: f64) bool {
+            return a < b;
+        }
 
         fn binaryOp(
             self: *Self,
-            comptime T: type,
-            valueInit: fn (v: T) Value,
-            op: fn (a: T, b: T) T,
+            comptime I: type,
+            comptime O: type,
+            valueInit: fn (v: O) Value,
+            op: fn (a: I, b: I) O,
         ) InterpretError!void {
             const b = switch (self.peek(0)) {
                 ValueType.number => |b| b,
@@ -188,6 +206,14 @@ pub fn VM(comptime flags: Flags) type {
 
         fn peek(self: *Self, distance: usize) Value {
             return self.stack[self.stackTop - 1 - distance];
+        }
+
+        fn isFalsey(value: Value) bool {
+            return switch (value) {
+                Value.nil => true,
+                Value.boolean => |boolean| !boolean,
+                else => false,
+            };
         }
 
         fn runtimeError(self: *Self, comptime fmt: []const u8, args: anytype) void {

@@ -144,11 +144,26 @@ pub fn Parser(comptime flags: Flags) type {
             self.parsePrecedence(@intToEnum(Precedence, @enumToInt(rule.precedence) + 1));
 
             switch (operatorType) {
+                TT.BANG_EQUAL => self.emitBytes(@enumToInt(OpCode.EQUAL), @enumToInt(OpCode.NOT)),
+                TT.EQUAL_EQUAL => self.emitByte(@enumToInt(OpCode.EQUAL)),
+                TT.GREATER => self.emitByte(@enumToInt(OpCode.GREATER)),
+                TT.GREATER_EQUAL => self.emitBytes(@enumToInt(OpCode.LESS), @enumToInt(OpCode.NOT)),
+                TT.LESS => self.emitByte(@enumToInt(OpCode.LESS)),
+                TT.LESS_EQUAL => self.emitBytes(@enumToInt(OpCode.GREATER), @enumToInt(OpCode.NOT)),
                 TT.PLUS => self.emitByte(@enumToInt(OpCode.ADD)),
                 TT.MINUS => self.emitByte(@enumToInt(OpCode.SUBTRACT)),
                 TT.STAR => self.emitByte(@enumToInt(OpCode.MULTIPLY)),
                 TT.SLASH => self.emitByte(@enumToInt(OpCode.DIVIDE)),
                 else => unreachable, // Unreachable.
+            }
+        }
+
+        fn literal(self: *Self) void {
+            switch (self.previous.type) {
+                TT.FALSE => self.emitByte(@enumToInt(OpCode.FALSE)),
+                TT.NIL => self.emitByte(@enumToInt(OpCode.NIL)),
+                TT.TRUE => self.emitByte(@enumToInt(OpCode.TRUE)),
+                else => unreachable,
             }
         }
 
@@ -171,6 +186,7 @@ pub fn Parser(comptime flags: Flags) type {
 
             // Emit the operator instruction.
             switch (operatorType) {
+                TT.BANG => self.emitByte(@enumToInt(OpCode.NOT)),
                 TT.MINUS => self.emitByte(@enumToInt(OpCode.NEGATE)),
                 else => unreachable, // Unreachable.
             }
@@ -241,31 +257,31 @@ pub fn Parser(comptime flags: Flags) type {
             _rules[@enumToInt(TT.SEMICOLON)] = .{ .prefix = null, .infix = null, .precedence = Precedence.NONE };
             _rules[@enumToInt(TT.SLASH)] = .{ .prefix = null, .infix = &binary, .precedence = Precedence.FACTOR };
             _rules[@enumToInt(TT.STAR)] = .{ .prefix = null, .infix = &binary, .precedence = Precedence.FACTOR };
-            _rules[@enumToInt(TT.BANG)] = .{ .prefix = null, .infix = null, .precedence = Precedence.NONE };
-            _rules[@enumToInt(TT.BANG_EQUAL)] = .{ .prefix = null, .infix = null, .precedence = Precedence.NONE };
+            _rules[@enumToInt(TT.BANG)] = .{ .prefix = &unary, .infix = null, .precedence = Precedence.NONE };
+            _rules[@enumToInt(TT.BANG_EQUAL)] = .{ .prefix = null, .infix = &binary, .precedence = Precedence.EQUALITY };
             _rules[@enumToInt(TT.EQUAL)] = .{ .prefix = null, .infix = null, .precedence = Precedence.NONE };
-            _rules[@enumToInt(TT.EQUAL_EQUAL)] = .{ .prefix = null, .infix = null, .precedence = Precedence.NONE };
-            _rules[@enumToInt(TT.GREATER)] = .{ .prefix = null, .infix = null, .precedence = Precedence.NONE };
-            _rules[@enumToInt(TT.GREATER_EQUAL)] = .{ .prefix = null, .infix = null, .precedence = Precedence.NONE };
-            _rules[@enumToInt(TT.LESS)] = .{ .prefix = null, .infix = null, .precedence = Precedence.NONE };
-            _rules[@enumToInt(TT.LESS_EQUAL)] = .{ .prefix = null, .infix = null, .precedence = Precedence.NONE };
+            _rules[@enumToInt(TT.EQUAL_EQUAL)] = .{ .prefix = null, .infix = &binary, .precedence = Precedence.EQUALITY };
+            _rules[@enumToInt(TT.GREATER)] = .{ .prefix = null, .infix = &binary, .precedence = Precedence.COMPARISON };
+            _rules[@enumToInt(TT.GREATER_EQUAL)] = .{ .prefix = null, .infix = &binary, .precedence = Precedence.COMPARISON };
+            _rules[@enumToInt(TT.LESS)] = .{ .prefix = null, .infix = &binary, .precedence = Precedence.COMPARISON };
+            _rules[@enumToInt(TT.LESS_EQUAL)] = .{ .prefix = null, .infix = &binary, .precedence = Precedence.COMPARISON };
             _rules[@enumToInt(TT.IDENTIFIER)] = .{ .prefix = null, .infix = null, .precedence = Precedence.NONE };
             _rules[@enumToInt(TT.STRING)] = .{ .prefix = null, .infix = null, .precedence = Precedence.NONE };
             _rules[@enumToInt(TT.NUMBER)] = .{ .prefix = &number, .infix = null, .precedence = Precedence.NONE };
             _rules[@enumToInt(TT.AND)] = .{ .prefix = null, .infix = null, .precedence = Precedence.NONE };
             _rules[@enumToInt(TT.CLASS)] = .{ .prefix = null, .infix = null, .precedence = Precedence.NONE };
             _rules[@enumToInt(TT.ELSE)] = .{ .prefix = null, .infix = null, .precedence = Precedence.NONE };
-            _rules[@enumToInt(TT.FALSE)] = .{ .prefix = null, .infix = null, .precedence = Precedence.NONE };
+            _rules[@enumToInt(TT.FALSE)] = .{ .prefix = &literal, .infix = null, .precedence = Precedence.NONE };
             _rules[@enumToInt(TT.FOR)] = .{ .prefix = null, .infix = null, .precedence = Precedence.NONE };
             _rules[@enumToInt(TT.FUN)] = .{ .prefix = null, .infix = null, .precedence = Precedence.NONE };
             _rules[@enumToInt(TT.IF)] = .{ .prefix = null, .infix = null, .precedence = Precedence.NONE };
-            _rules[@enumToInt(TT.NIL)] = .{ .prefix = null, .infix = null, .precedence = Precedence.NONE };
+            _rules[@enumToInt(TT.NIL)] = .{ .prefix = &literal, .infix = null, .precedence = Precedence.NONE };
             _rules[@enumToInt(TT.OR)] = .{ .prefix = null, .infix = null, .precedence = Precedence.NONE };
             _rules[@enumToInt(TT.PRINT)] = .{ .prefix = null, .infix = null, .precedence = Precedence.NONE };
             _rules[@enumToInt(TT.RETURN)] = .{ .prefix = null, .infix = null, .precedence = Precedence.NONE };
             _rules[@enumToInt(TT.SUPER)] = .{ .prefix = null, .infix = null, .precedence = Precedence.NONE };
             _rules[@enumToInt(TT.THIS)] = .{ .prefix = null, .infix = null, .precedence = Precedence.NONE };
-            _rules[@enumToInt(TT.TRUE)] = .{ .prefix = null, .infix = null, .precedence = Precedence.NONE };
+            _rules[@enumToInt(TT.TRUE)] = .{ .prefix = &literal, .infix = null, .precedence = Precedence.NONE };
             _rules[@enumToInt(TT.VAR)] = .{ .prefix = null, .infix = null, .precedence = Precedence.NONE };
             _rules[@enumToInt(TT.WHILE)] = .{ .prefix = null, .infix = null, .precedence = Precedence.NONE };
             _rules[@enumToInt(TT.ERROR)] = .{ .prefix = null, .infix = null, .precedence = Precedence.NONE };

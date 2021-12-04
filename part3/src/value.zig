@@ -43,10 +43,29 @@ pub const Value = union(ValueType) {
     fn isNil(self: *Self) bool {
         return @as(ValueTYpe, self) == ValueType.nil;
     }
+
+    pub fn equals(self: *const Self, b: Value) bool {
+        if (@as(ValueType, self.*) != @as(ValueType, b)) {
+            return false;
+        }
+        return switch (self.*) {
+            Value.boolean => |a| a == b.boolean,
+            Value.nil => false,
+            Value.number => |a| a == b.number,
+        };
+    }
 };
 
+fn booleanStr(boolean: bool) []const u8 {
+    return if (boolean) ("true")[0..] else ("false")[0..];
+}
+
 pub fn printValue(val: Value) void {
-    print("\'{d}\'", .{val.number});
+    switch (val) {
+        Value.boolean => |boolean| print("{s}", .{booleanStr(boolean)}),
+        Value.nil => print("nil", .{}),
+        Value.number => |number| print("{d}", .{number}),
+    }
 }
 
 pub const ValueArray = struct {
