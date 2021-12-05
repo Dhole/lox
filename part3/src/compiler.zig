@@ -5,6 +5,7 @@ const _chunk = @import("chunk.zig");
 const _token = @import("token.zig");
 const _value = @import("value.zig");
 const _common = @import("common.zig");
+const _object = @import("object.zig");
 const debug = @import("debug.zig");
 
 const print = std.debug.print;
@@ -16,6 +17,8 @@ const Scanner = _scanner.Scanner;
 const Token = _token.Token;
 const TT = _token.TokenType;
 const Flags = _common.Flags;
+const copyString = _object.copyString;
+const Obj = _object.Obj;
 
 const Precedence = enum { //
 NONE, //
@@ -179,6 +182,11 @@ pub fn Parser(comptime flags: Flags) type {
             _ = self.emitConstant(.{ .number = value });
         }
 
+        fn string(self: *Self) void {
+            const objString = copyString(self.previous.value[1 .. self.previous.value.len - 1]);
+            _ = self.emitConstant(Value{ .obj = Obj{ .string = objString } });
+        }
+
         fn unary(self: *Self) void {
             const operatorType = self.previous.type;
             // Compile the operand.
@@ -266,7 +274,7 @@ pub fn Parser(comptime flags: Flags) type {
             _rules[@enumToInt(TT.LESS)] = .{ .prefix = null, .infix = &binary, .precedence = Precedence.COMPARISON };
             _rules[@enumToInt(TT.LESS_EQUAL)] = .{ .prefix = null, .infix = &binary, .precedence = Precedence.COMPARISON };
             _rules[@enumToInt(TT.IDENTIFIER)] = .{ .prefix = null, .infix = null, .precedence = Precedence.NONE };
-            _rules[@enumToInt(TT.STRING)] = .{ .prefix = null, .infix = null, .precedence = Precedence.NONE };
+            _rules[@enumToInt(TT.STRING)] = .{ .prefix = &string, .infix = null, .precedence = Precedence.NONE };
             _rules[@enumToInt(TT.NUMBER)] = .{ .prefix = &number, .infix = null, .precedence = Precedence.NONE };
             _rules[@enumToInt(TT.AND)] = .{ .prefix = null, .infix = null, .precedence = Precedence.NONE };
             _rules[@enumToInt(TT.CLASS)] = .{ .prefix = null, .infix = null, .precedence = Precedence.NONE };

@@ -1,24 +1,29 @@
 const std = @import("std");
 
 const _memory = @import("memory.zig");
+const _object = @import("object.zig");
 
 const growCapacity = _memory.growCapacity;
 const growArray = _memory.growArray;
 const freeArray = _memory.freeArray;
 const print = std.debug.print;
+const Obj = _object.Obj;
+const printObject = _object.printObject;
 
 pub const ValueType = enum {
     boolean,
     nil,
     number,
+    obj,
 };
 
 pub const Value = union(ValueType) {
     const Self = @This();
 
     boolean: bool,
-    number: f64,
     nil: void,
+    number: f64,
+    obj: Obj,
 
     pub fn initBool(value: bool) Self {
         return Self{ .boolean = value };
@@ -32,16 +37,24 @@ pub const Value = union(ValueType) {
         return Self.nil;
     }
 
+    pub fn initObj(object: Obj) Self {
+        return Self{ .obj = object };
+    }
+
     fn isBool(self: *Self) bool {
-        return @as(ValueTYpe, self) == ValueType.boolean;
+        return @as(ValueType, self) == ValueType.boolean;
     }
 
     fn isNumber(self: *Self) bool {
-        return @as(ValueTYpe, self) == ValueType.number;
+        return @as(ValueType, self) == ValueType.number;
     }
 
     fn isNil(self: *Self) bool {
-        return @as(ValueTYpe, self) == ValueType.nil;
+        return @as(ValueType, self) == ValueType.nil;
+    }
+
+    fn isObj(self: *Self) bool {
+        return @as(ValueType, self) == ValueType.obj;
     }
 
     pub fn equals(self: *const Self, b: Value) bool {
@@ -52,6 +65,11 @@ pub const Value = union(ValueType) {
             Value.boolean => |a| a == b.boolean,
             Value.nil => false,
             Value.number => |a| a == b.number,
+            Value.obj => |a| blk: {
+                const aString = a.string;
+                const bString = b.obj.string;
+                break :blk std.mem.eql(u8, aString.chars, bString.chars);
+            },
         };
     }
 };
@@ -65,6 +83,7 @@ pub fn printValue(val: Value) void {
         Value.boolean => |boolean| print("{s}", .{booleanStr(boolean)}),
         Value.nil => print("nil", .{}),
         Value.number => |number| print("{d}", .{number}),
+        Value.obj => |obj| printObject(obj),
     }
 }
 
