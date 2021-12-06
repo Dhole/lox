@@ -5,6 +5,8 @@ const _common = @import("common.zig");
 const _value = @import("value.zig");
 const _debug = @import("debug.zig");
 const _compiler = @import("compiler.zig");
+const _object = @import("object.zig");
+const _memory = @import("memory.zig");
 
 const print = std.debug.print;
 
@@ -16,6 +18,9 @@ const printValue = _value.printValue;
 const disassembleInstruction = _debug.disassembleInstruction;
 const Parser = _compiler.Parser;
 const Flags = _common.Flags;
+const Obj = _object.Obj;
+const Objects = _object.Objects;
+const allocate = _memory.allocate;
 
 pub const InterpretResult = enum {
     OK,
@@ -38,6 +43,7 @@ pub fn VM(comptime flags: Flags) type {
         pc: usize,
         stack: [STACK_MAX]Value,
         stackTop: usize,
+        objects: Objects,
 
         pub fn init() Self {
             return Self{
@@ -45,11 +51,12 @@ pub fn VM(comptime flags: Flags) type {
                 .pc = undefined,
                 .stack = undefined,
                 .stackTop = 0,
+                .objects = Objects.init(),
             };
         }
 
         pub fn deinit(self: *Self) void {
-            _ = self;
+            self.objects.deinit();
         }
 
         pub fn resetStack(self: *Self) void {
@@ -74,7 +81,7 @@ pub fn VM(comptime flags: Flags) type {
             var chunk = Chunk.init();
             var parser = Parser(flags).init();
             defer chunk.deinit();
-            if (!parser.compile(source, &chunk)) {
+            if (!parser.compile(&self.objects, source, &chunk)) {
                 return InterpretResult.COMPILE_ERROR;
             }
             self.chunk = &chunk;
@@ -131,7 +138,20 @@ pub fn VM(comptime flags: Flags) type {
                             },
                         }
                     },
-                    @enumToInt(OpCode.ADD) => try self.binaryOp(f64, f64, Value.initNumber, add),
+                    @enumToInt(OpCode.ADD) => {
+                        const b = self.peek(0);
+                        const a = self.peek(1);
+                        if (a.isString() and b.isString()) {
+                            self.concatenate();
+                        } else if (a.isNumber() and b.isNumber()) {
+                            _ = self.pop();
+                            _ = self.pop();
+                            self.push(.{ .number = a.number + b.number });
+                        } else {
+                            self.runtimeError("Operands must be two numbers or two strings.", .{});
+                            return InterpretError.Runtime;
+                        }
+                    },
                     @enumToInt(OpCode.SUBTRACT) => try self.binaryOp(f64, f64, Value.initNumber, sub),
                     @enumToInt(OpCode.MULTIPLY) => try self.binaryOp(f64, f64, Value.initNumber, mul),
                     @enumToInt(OpCode.DIVIDE) => try self.binaryOp(f64, f64, Value.initNumber, div),
@@ -214,6 +234,18 @@ pub fn VM(comptime flags: Flags) type {
                 Value.boolean => |boolean| !boolean,
                 else => false,
             };
+        }
+
+        fn concatenate(self: *Self) void {
+            const b = self.pop().obj.asString();
+            const a = self.pop().obj.asString();
+
+            const length = a.chars.len + b.chars.len;
+            var chars = allocate(u8, length);
+            std.mem.copy(u8, chars[0..a.chars.len], a.chars);
+            std.mem.copy(u8, chars[a.chars.len..], b.chars);
+            const res = self.objects.takeString(chars);
+            self.push(.{ .obj = @ptrCast(*Obj, res) });
         }
 
         fn runtimeError(self: *Self, comptime fmt: []const u8, args: anytype) void {

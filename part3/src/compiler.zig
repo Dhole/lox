@@ -19,6 +19,7 @@ const TT = _token.TokenType;
 const Flags = _common.Flags;
 const copyString = _object.copyString;
 const Obj = _object.Obj;
+const Objects = _object.Objects;
 
 const Precedence = enum { //
 NONE, //
@@ -50,6 +51,7 @@ pub fn Parser(comptime flags: Flags) type {
         previous: Token,
         compilingChunk: *Chunk,
         scanner: *Scanner,
+        objects: *Objects,
         hadError: bool,
         panicMode: bool,
 
@@ -59,16 +61,18 @@ pub fn Parser(comptime flags: Flags) type {
                 .previous = undefined,
                 .compilingChunk = undefined,
                 .scanner = undefined,
+                .objects = undefined,
                 .hadError = false,
                 .panicMode = false,
             };
         }
 
-        pub fn compile(self: *Self, source: []const u8, chunk: *Chunk) bool {
+        pub fn compile(self: *Self, objects: *Objects, source: []const u8, chunk: *Chunk) bool {
             self.compilingChunk = chunk;
             self.hadError = false;
             self.panicMode = false;
             self.scanner = &Scanner.init(source);
+            self.objects = objects;
 
             self.advance();
             self.expression();
@@ -183,8 +187,8 @@ pub fn Parser(comptime flags: Flags) type {
         }
 
         fn string(self: *Self) void {
-            const objString = copyString(self.previous.value[1 .. self.previous.value.len - 1]);
-            _ = self.emitConstant(Value{ .obj = Obj{ .string = objString } });
+            const objString = self.objects.copyString(self.previous.value[1 .. self.previous.value.len - 1]);
+            _ = self.emitConstant(.{ .obj = @ptrCast(*Obj, objString) });
         }
 
         fn unary(self: *Self) void {

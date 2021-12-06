@@ -20,6 +20,7 @@ var allocator = &gpa.allocator;
 pub fn main() anyerror!u8 {
     const flags = Flags{ .debugTraceExecution = true, .debugPrintCode = true };
     var vm = VM(flags).init();
+    defer vm.deinit();
 
     const args = std.os.argv[1..std.os.argv.len];
     if (args.len == 0) {
@@ -35,7 +36,6 @@ pub fn main() anyerror!u8 {
         return 64;
     }
 
-    vm.deinit();
     return 0;
 }
 

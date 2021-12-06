@@ -8,6 +8,7 @@ const growArray = _memory.growArray;
 const freeArray = _memory.freeArray;
 const print = std.debug.print;
 const Obj = _object.Obj;
+const ObjType = _object.ObjType;
 const printObject = _object.printObject;
 
 pub const ValueType = enum {
@@ -23,7 +24,7 @@ pub const Value = union(ValueType) {
     boolean: bool,
     nil: void,
     number: f64,
-    obj: Obj,
+    obj: *Obj,
 
     pub fn initBool(value: bool) Self {
         return Self{ .boolean = value };
@@ -37,7 +38,7 @@ pub const Value = union(ValueType) {
         return Self.nil;
     }
 
-    pub fn initObj(object: Obj) Self {
+    pub fn initObj(object: *Obj) Self {
         return Self{ .obj = object };
     }
 
@@ -45,8 +46,8 @@ pub const Value = union(ValueType) {
         return @as(ValueType, self) == ValueType.boolean;
     }
 
-    fn isNumber(self: *Self) bool {
-        return @as(ValueType, self) == ValueType.number;
+    pub fn isNumber(self: *const Self) bool {
+        return @as(ValueType, self.*) == ValueType.number;
     }
 
     fn isNil(self: *Self) bool {
@@ -55,6 +56,13 @@ pub const Value = union(ValueType) {
 
     fn isObj(self: *Self) bool {
         return @as(ValueType, self) == ValueType.obj;
+    }
+
+    pub fn isString(self: *const Self) bool {
+        return switch (self.*) {
+            Value.obj => |obj| obj.type == ObjType.string,
+            else => false,
+        };
     }
 
     pub fn equals(self: *const Self, b: Value) bool {
@@ -66,8 +74,8 @@ pub const Value = union(ValueType) {
             Value.nil => false,
             Value.number => |a| a == b.number,
             Value.obj => |a| blk: {
-                const aString = a.string;
-                const bString = b.obj.string;
+                const aString = a.asString();
+                const bString = b.obj.asString();
                 break :blk std.mem.eql(u8, aString.chars, bString.chars);
             },
         };
