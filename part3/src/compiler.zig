@@ -188,7 +188,7 @@ pub fn Parser(comptime flags: Flags) type {
 
         fn string(self: *Self) void {
             const objString = self.objects.copyString(self.previous.value[1 .. self.previous.value.len - 1]);
-            _ = self.emitConstant(.{ .obj = @ptrCast(*Obj, objString) });
+            _ = self.emitConstant(.{ .obj = objString.asObj() });
         }
 
         fn unary(self: *Self) void {

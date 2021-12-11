@@ -1,21 +1,34 @@
 const std = @import("std");
 
 const _memory = @import("memory.zig");
+const _table = @import("table.zig");
 
 const print = std.debug.print;
 const allocate = _memory.allocate;
 const create = _memory.create;
 const destroy = _memory.destroy;
 const freeArray = _memory.freeArray;
+const Table = _table.Table;
+
+fn hashString(key: []const u8) u32 {
+    var hash: u32 = 2166136261;
+    for (key) |c| {
+        hash ^= c;
+        _ = @mulWithOverflow(u32, hash, 16777619, &hash);
+    }
+    return hash;
+}
 
 pub const Objects = struct {
     const Self = @This();
 
     objects: ?*Obj,
+    strings: Table,
 
     pub fn init() Self {
         return Self{
             .objects = null,
+            .strings = Table.init(),
         };
     }
 
@@ -28,20 +41,33 @@ pub const Objects = struct {
         return @ptrCast(*T, object);
     }
 
-    pub fn allocateString(self: *Self, chars: []u8) *ObjString {
+    pub fn allocateString(self: *Self, chars: []u8, hash: u32) *ObjString {
         var string = self.allocateObject(ObjString, ObjType.string);
         string.chars = chars;
+        string.hash = hash;
+        _ = self.strings.set(string, .nil);
         return string;
     }
 
     pub fn copyString(self: *Self, chars: []const u8) *ObjString {
+        const hash = hashString(chars);
+        if (self.strings.findString(chars, hash)) |interned| {
+            return interned;
+        }
+
         var heapChars = allocate(u8, chars.len);
         std.mem.copy(u8, heapChars, chars);
-        return self.allocateString(heapChars);
+        return self.allocateString(heapChars, hash);
     }
 
     pub fn takeString(self: *Self, chars: []u8) *ObjString {
-        return self.allocateString(chars);
+        const hash = hashString(chars);
+        if (self.strings.findString(chars, hash)) |interned| {
+            freeArray(u8, chars);
+            return interned;
+        }
+
+        return self.allocateString(chars, hash);
     }
 
     // freeObjects
@@ -52,12 +78,20 @@ pub const Objects = struct {
             obj.deinit();
             object = next;
         }
+        self.strings.deinit();
     }
 };
 
 pub const ObjString = struct {
+    const Self = @This();
+
     obj: Obj,
     chars: []u8,
+    hash: u32,
+
+    pub fn asObj(self: *Self) *Obj {
+        return @ptrCast(*Obj, self);
+    }
 };
 
 pub const ObjType = enum {
@@ -78,7 +112,7 @@ pub const Obj = struct {
     pub fn deinit(self: *Self) void {
         switch (self.type) {
             ObjType.string => {
-                var string = @ptrCast(*ObjString, self);
+                var string = self.asString();
                 freeArray(u8, string.chars);
                 destroy(string);
             },

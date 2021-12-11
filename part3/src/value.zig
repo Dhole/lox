@@ -42,20 +42,20 @@ pub const Value = union(ValueType) {
         return Self{ .obj = object };
     }
 
-    fn isBool(self: *Self) bool {
-        return @as(ValueType, self) == ValueType.boolean;
+    pub fn isBool(self: *const Self) bool {
+        return self.* == ValueType.boolean;
     }
 
     pub fn isNumber(self: *const Self) bool {
-        return @as(ValueType, self.*) == ValueType.number;
+        return self.* == ValueType.number;
     }
 
-    fn isNil(self: *Self) bool {
-        return @as(ValueType, self) == ValueType.nil;
+    pub fn isNil(self: *const Self) bool {
+        return self.* == ValueType.nil;
     }
 
-    fn isObj(self: *Self) bool {
-        return @as(ValueType, self) == ValueType.obj;
+    pub fn isObj(self: *const Self) bool {
+        return self.* == ValueType.obj;
     }
 
     pub fn isString(self: *const Self) bool {
@@ -73,11 +73,7 @@ pub const Value = union(ValueType) {
             Value.boolean => |a| a == b.boolean,
             Value.nil => false,
             Value.number => |a| a == b.number,
-            Value.obj => |a| blk: {
-                const aString = a.asString();
-                const bString = b.obj.asString();
-                break :blk std.mem.eql(u8, aString.chars, bString.chars);
-            },
+            Value.obj => |a| a == b.obj,
         };
     }
 };

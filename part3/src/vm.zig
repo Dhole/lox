@@ -7,6 +7,7 @@ const _debug = @import("debug.zig");
 const _compiler = @import("compiler.zig");
 const _object = @import("object.zig");
 const _memory = @import("memory.zig");
+const _table = @import("table.zig");
 
 const print = std.debug.print;
 
@@ -21,6 +22,7 @@ const Flags = _common.Flags;
 const Obj = _object.Obj;
 const Objects = _object.Objects;
 const allocate = _memory.allocate;
+const Table = _table.Table;
 
 pub const InterpretResult = enum {
     OK,
@@ -245,7 +247,7 @@ pub fn VM(comptime flags: Flags) type {
             std.mem.copy(u8, chars[0..a.chars.len], a.chars);
             std.mem.copy(u8, chars[a.chars.len..], b.chars);
             const res = self.objects.takeString(chars);
-            self.push(.{ .obj = @ptrCast(*Obj, res) });
+            self.push(.{ .obj = res.asObj() });
         }
 
         fn runtimeError(self: *Self, comptime fmt: []const u8, args: anytype) void {
