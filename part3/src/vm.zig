@@ -20,6 +20,7 @@ const disassembleInstruction = _debug.disassembleInstruction;
 const Parser = _compiler.Parser;
 const Flags = _common.Flags;
 const Obj = _object.Obj;
+const ObjString = _object.ObjString;
 const Objects = _object.Objects;
 const allocate = _memory.allocate;
 const Table = _table.Table;
@@ -45,6 +46,7 @@ pub fn VM(comptime flags: Flags) type {
         pc: usize,
         stack: [STACK_MAX]Value,
         stackTop: usize,
+        globals: Table,
         objects: Objects,
 
         pub fn init() Self {
@@ -53,11 +55,13 @@ pub fn VM(comptime flags: Flags) type {
                 .pc = undefined,
                 .stack = undefined,
                 .stackTop = 0,
+                .globals = Table.init(),
                 .objects = Objects.init(),
             };
         }
 
         pub fn deinit(self: *Self) void {
+            self.globals.deinit();
             self.objects.deinit();
         }
 
@@ -121,6 +125,31 @@ pub fn VM(comptime flags: Flags) type {
                     @enumToInt(OpCode.NIL) => self.push(.nil),
                     @enumToInt(OpCode.TRUE) => self.push(.{ .boolean = true }),
                     @enumToInt(OpCode.FALSE) => self.push(.{ .boolean = false }),
+                    @enumToInt(OpCode.POP) => {
+                        _ = self.pop();
+                    },
+                    @enumToInt(OpCode.GET_GLOBAL) => {
+                        const name = self.readString();
+                        var value: Value = undefined;
+                        if (!self.globals.get(name, &value)) {
+                            self.runtimeError("Undefined variable '{s}'.", .{name.chars});
+                            return InterpretError.Runtime;
+                        }
+                        self.push(value);
+                    },
+                    @enumToInt(OpCode.DEFINE_GLOBAL) => {
+                        const name = self.readString();
+                        _ = self.globals.set(name, self.peek(0));
+                        _ = self.pop();
+                    },
+                    @enumToInt(OpCode.SET_GLOBAL) => {
+                        const name = self.readString();
+                        if (self.globals.set(name, self.peek(0))) {
+                            _ = self.globals.delete(name);
+                            self.runtimeError("Undefined variable '{s}'.", .{name.chars});
+                            return InterpretError.Runtime;
+                        }
+                    },
                     @enumToInt(OpCode.EQUAL) => {
                         const b = self.pop();
                         const a = self.pop();
@@ -158,9 +187,11 @@ pub fn VM(comptime flags: Flags) type {
                     @enumToInt(OpCode.MULTIPLY) => try self.binaryOp(f64, f64, Value.initNumber, mul),
                     @enumToInt(OpCode.DIVIDE) => try self.binaryOp(f64, f64, Value.initNumber, div),
                     @enumToInt(OpCode.NOT) => self.push(.{ .boolean = isFalsey(self.pop()) }),
-                    @enumToInt(OpCode.RETURN) => {
+                    @enumToInt(OpCode.PRINT) => {
                         printValue(self.pop());
                         print("\n", .{});
+                    },
+                    @enumToInt(OpCode.RETURN) => {
                         return;
                     },
                     else => {
@@ -224,6 +255,10 @@ pub fn VM(comptime flags: Flags) type {
 
         fn readConstant(self: *Self) Value {
             return self.chunk.constants.values[self.readByte()];
+        }
+
+        fn readString(self: *Self) *ObjString {
+            return self.readConstant().obj.asString();
         }
 
         fn peek(self: *Self, distance: usize) Value {

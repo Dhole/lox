@@ -162,7 +162,9 @@ pub const Scanner = struct {
     }
 
     fn checkKeyword(self: *Self, start: usize, rest: []const u8, typ: TT) TT {
-        if (std.mem.eql(u8, self.source[self.start + start .. self.start + start + rest.len], rest)) {
+        if (self.current - self.start == start + rest.len and
+            std.mem.eql(u8, self.source[self.start + start .. self.start + start + rest.len], rest))
+        {
             return typ;
         }
         return TT.IDENTIFIER;

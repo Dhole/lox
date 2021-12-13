@@ -29,11 +29,16 @@ pub fn disassembleInstruction(chunk: *Chunk, offset: usize) usize {
 
     const instruction = chunk.code[offset];
     return switch (instruction) {
+        @enumToInt(OpCode.PRINT) => simpleInstruction("OP_PRINT", offset),
         @enumToInt(OpCode.RETURN) => simpleInstruction("OP_RETURN", offset),
         @enumToInt(OpCode.CONSTANT) => constantInstruction("OP_CONSTANT", chunk, offset),
         @enumToInt(OpCode.NIL) => simpleInstruction("OP_NIL", offset),
         @enumToInt(OpCode.TRUE) => simpleInstruction("OP_TRUE", offset),
         @enumToInt(OpCode.FALSE) => simpleInstruction("OP_FALSE", offset),
+        @enumToInt(OpCode.POP) => simpleInstruction("OP_POP", offset),
+        @enumToInt(OpCode.GET_GLOBAL) => constantInstruction("OP_GET_GLOBAL", chunk, offset),
+        @enumToInt(OpCode.DEFINE_GLOBAL) => constantInstruction("OP_DEFINE_GLOBAL", chunk, offset),
+        @enumToInt(OpCode.SET_GLOBAL) => constantInstruction("OP_SET_GLOBAL", chunk, offset),
         @enumToInt(OpCode.EQUAL) => simpleInstruction("OP_EQUAL", offset),
         @enumToInt(OpCode.GREATER) => simpleInstruction("OP_GREATER", offset),
         @enumToInt(OpCode.LESS) => simpleInstruction("OP_LESS", offset),

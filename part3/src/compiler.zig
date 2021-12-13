@@ -39,7 +39,7 @@ pub fn Parser(comptime flags: Flags) type {
         const Self = @This();
         const rules = genRules();
 
-        const ParseFn = fn (*Parser(flags)) void;
+        const ParseFn = fn (*Parser(flags), canAssign: bool) void;
 
         const ParseRule = struct {
             prefix: ?*const ParseFn,
@@ -75,14 +75,72 @@ pub fn Parser(comptime flags: Flags) type {
             self.objects = objects;
 
             self.advance();
-            self.expression();
-            self.consume(TT.EOF, "Expect end of expression.");
+            while (!self.match(TT.EOF)) {
+                self.declaration();
+            }
             self.endCompiler();
             return !self.hadError;
         }
 
         fn expression(self: *Self) void {
             self.parsePrecedence(Precedence.ASSIGNMENT);
+        }
+
+        fn varDeclaration(self: *Self) void {
+            const global = self.parseVariable("Expect variable name.");
+            if (self.match(TT.EQUAL)) {
+                self.expression();
+            } else {
+                self.emitByte(@enumToInt(OpCode.NIL));
+            }
+            self.consume(TT.SEMICOLON, "Expect ';' after variable declaration.");
+            self.defineVariable(global);
+        }
+
+        fn expressionStatement(self: *Self) void {
+            self.expression();
+            self.consume(TT.SEMICOLON, "Expect ';' after value.");
+            self.emitByte(@enumToInt(OpCode.POP));
+        }
+
+        fn printStatement(self: *Self) void {
+            self.expression();
+            self.consume(TT.SEMICOLON, "Expect ';' after value.");
+            self.emitByte(@enumToInt(OpCode.PRINT));
+        }
+
+        fn synchronize(self: *Self) void {
+            self.panicMode = false;
+
+            while (self.current.type != TT.EOF) {
+                if (self.previous.type == TT.SEMICOLON) {
+                    return;
+                }
+                switch (self.current.type) {
+                    TT.CLASS, TT.FUN, TT.VAR, TT.FOR, TT.IF, TT.WHILE, TT.PRINT, TT.RETURN => return,
+                    else => {},
+                }
+            }
+            self.advance();
+        }
+
+        fn declaration(self: *Self) void {
+            if (self.match(TT.VAR)) {
+                self.varDeclaration();
+            } else {
+                self.statement();
+            }
+            if (self.panicMode) {
+                self.synchronize();
+            }
+        }
+
+        fn statement(self: *Self) void {
+            if (self.match(TT.PRINT)) {
+                self.printStatement();
+            } else {
+                self.expressionStatement();
+            }
         }
 
         fn currentChunk(self: *Self) *Chunk {
@@ -108,6 +166,18 @@ pub fn Parser(comptime flags: Flags) type {
                 return;
             }
             self.errAtCurrent(message);
+        }
+
+        fn check(self: *Self, typ: TT) bool {
+            return self.current.type == typ;
+        }
+
+        fn match(self: *Self, typ: TT) bool {
+            if (!self.check(typ)) {
+                return false;
+            }
+            self.advance();
+            return true;
         }
 
         fn emitByte(self: *Self, byte: u8) void {
@@ -145,7 +215,8 @@ pub fn Parser(comptime flags: Flags) type {
             }
         }
 
-        fn binary(self: *Self) void {
+        fn binary(self: *Self, canAssign: bool) void {
+            _ = canAssign;
             const operatorType = self.previous.type;
             const rule = getRule(operatorType);
             self.parsePrecedence(@intToEnum(Precedence, @enumToInt(rule.precedence) + 1));
@@ -165,7 +236,8 @@ pub fn Parser(comptime flags: Flags) type {
             }
         }
 
-        fn literal(self: *Self) void {
+        fn literal(self: *Self, canAssign: bool) void {
+            _ = canAssign;
             switch (self.previous.type) {
                 TT.FALSE => self.emitByte(@enumToInt(OpCode.FALSE)),
                 TT.NIL => self.emitByte(@enumToInt(OpCode.NIL)),
@@ -174,24 +246,42 @@ pub fn Parser(comptime flags: Flags) type {
             }
         }
 
-        fn grouping(self: *Self) void {
+        fn grouping(self: *Self, canAssign: bool) void {
+            _ = canAssign;
             self.expression();
             self.consume(TT.RIGHT_PAREN, "Expect ')' after expression.");
         }
 
-        fn number(self: *Self) void {
+        fn number(self: *Self, canAssign: bool) void {
+            _ = canAssign;
             const value = std.fmt.parseFloat(f64, self.previous.value) catch |e| {
                 std.debug.panic("{}", .{e});
             };
             _ = self.emitConstant(.{ .number = value });
         }
 
-        fn string(self: *Self) void {
+        fn string(self: *Self, canAssign: bool) void {
+            _ = canAssign;
             const objString = self.objects.copyString(self.previous.value[1 .. self.previous.value.len - 1]);
             _ = self.emitConstant(.{ .obj = objString.asObj() });
         }
 
-        fn unary(self: *Self) void {
+        fn namedVariable(self: *Self, name: Token, canAssign: bool) void {
+            const arg = self.identifierConstant(&name);
+            if (canAssign and self.match(TT.EQUAL)) {
+                self.expression();
+                self.emitBytes(@enumToInt(OpCode.SET_GLOBAL), arg);
+            } else {
+                self.emitBytes(@enumToInt(OpCode.GET_GLOBAL), arg);
+            }
+        }
+
+        fn variable(self: *Self, canAssign: bool) void {
+            self.namedVariable(self.previous, canAssign);
+        }
+
+        fn unary(self: *Self, canAssign: bool) void {
+            _ = canAssign;
             const operatorType = self.previous.type;
             // Compile the operand.
             self.parsePrecedence(Precedence.UNARY);
@@ -207,8 +297,9 @@ pub fn Parser(comptime flags: Flags) type {
         fn parsePrecedence(self: *Self, precedence: Precedence) void {
             self.advance();
             const prefixRule = getRule(self.previous.type).prefix;
+            const canAssign = @enumToInt(precedence) <= @enumToInt(Precedence.ASSIGNMENT);
             if (prefixRule) |rule| {
-                rule.*(self);
+                rule.*(self, canAssign);
             } else {
                 self.err("Expect expression.");
                 return;
@@ -218,11 +309,28 @@ pub fn Parser(comptime flags: Flags) type {
                 self.advance();
                 const infixRule = getRule(self.previous.type).infix;
                 if (infixRule) |rule| {
-                    rule.*(self);
+                    rule.*(self, canAssign);
                 } else {
                     unreachable;
                 }
             }
+
+            if (canAssign and self.match(TT.EQUAL)) {
+                self.err("Invalid assignment target.");
+            }
+        }
+
+        fn identifierConstant(self: *Self, name: *const Token) u8 {
+            return self.makeConstant(.{ .obj = self.objects.copyString(name.value).asObj() });
+        }
+
+        fn parseVariable(self: *Self, errorMessage: []const u8) u8 {
+            self.consume(TT.IDENTIFIER, errorMessage);
+            return self.identifierConstant(&self.previous);
+        }
+
+        fn defineVariable(self: *Self, global: u8) void {
+            self.emitBytes(@enumToInt(OpCode.DEFINE_GLOBAL), global);
         }
 
         fn getRule(typ: TT) *ParseRule {
@@ -277,7 +385,7 @@ pub fn Parser(comptime flags: Flags) type {
             _rules[@enumToInt(TT.GREATER_EQUAL)] = .{ .prefix = null, .infix = &binary, .precedence = Precedence.COMPARISON };
             _rules[@enumToInt(TT.LESS)] = .{ .prefix = null, .infix = &binary, .precedence = Precedence.COMPARISON };
             _rules[@enumToInt(TT.LESS_EQUAL)] = .{ .prefix = null, .infix = &binary, .precedence = Precedence.COMPARISON };
-            _rules[@enumToInt(TT.IDENTIFIER)] = .{ .prefix = null, .infix = null, .precedence = Precedence.NONE };
+            _rules[@enumToInt(TT.IDENTIFIER)] = .{ .prefix = &variable, .infix = null, .precedence = Precedence.NONE };
             _rules[@enumToInt(TT.STRING)] = .{ .prefix = &string, .infix = null, .precedence = Precedence.NONE };
             _rules[@enumToInt(TT.NUMBER)] = .{ .prefix = &number, .infix = null, .precedence = Precedence.NONE };
             _rules[@enumToInt(TT.AND)] = .{ .prefix = null, .infix = null, .precedence = Precedence.NONE };
