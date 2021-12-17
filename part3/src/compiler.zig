@@ -1,5 +1,6 @@
 const std = @import("std");
 
+const maxInt = std.math.maxInt;
 const _scanner = @import("scanner.zig");
 const _chunk = @import("chunk.zig");
 const _token = @import("token.zig");
@@ -34,6 +35,29 @@ UNARY, // ! -
 CALL, // . ()
 PRIMARY };
 
+pub const Local = struct {
+    name: Token,
+    depth: isize,
+};
+
+const U8_COUNT = maxInt(u8) + 1;
+
+pub const Compiler = struct {
+    const Self = @This();
+
+    locals: [U8_COUNT]Local,
+    localCount: usize,
+    scopeDepth: usize,
+
+    pub fn init() Self {
+        return Self{
+            .locals = undefined,
+            .localCount = 0,
+            .scopeDepth = 0,
+        };
+    }
+};
+
 pub fn Parser(comptime flags: Flags) type {
     return struct {
         const Self = @This();
@@ -51,6 +75,8 @@ pub fn Parser(comptime flags: Flags) type {
         previous: Token,
         compilingChunk: *Chunk,
         scanner: *Scanner,
+        // current in the book
+        compiler: *Compiler,
         objects: *Objects,
         hadError: bool,
         panicMode: bool,
@@ -61,6 +87,7 @@ pub fn Parser(comptime flags: Flags) type {
                 .previous = undefined,
                 .compilingChunk = undefined,
                 .scanner = undefined,
+                .compiler = undefined,
                 .objects = undefined,
                 .hadError = false,
                 .panicMode = false,
@@ -72,6 +99,7 @@ pub fn Parser(comptime flags: Flags) type {
             self.hadError = false;
             self.panicMode = false;
             self.scanner = &Scanner.init(source);
+            self.compiler = &Compiler.init();
             self.objects = objects;
 
             self.advance();
@@ -84,6 +112,13 @@ pub fn Parser(comptime flags: Flags) type {
 
         fn expression(self: *Self) void {
             self.parsePrecedence(Precedence.ASSIGNMENT);
+        }
+
+        fn block(self: *Self) void {
+            while (!self.check(TT.RIGHT_BRACE) and !self.check(TT.EOF)) {
+                self.declaration();
+            }
+            self.consume(TT.RIGHT_BRACE, "Expect '}' after block.");
         }
 
         fn varDeclaration(self: *Self) void {
@@ -138,6 +173,10 @@ pub fn Parser(comptime flags: Flags) type {
         fn statement(self: *Self) void {
             if (self.match(TT.PRINT)) {
                 self.printStatement();
+            } else if (self.match(TT.LEFT_BRACE)) {
+                self.beginScope();
+                self.block();
+                self.endScope();
             } else {
                 self.expressionStatement();
             }
@@ -215,6 +254,21 @@ pub fn Parser(comptime flags: Flags) type {
             }
         }
 
+        fn beginScope(self: *Self) void {
+            self.compiler.scopeDepth += 1;
+        }
+
+        fn endScope(self: *Self) void {
+            self.compiler.scopeDepth -= 1;
+
+            while (self.compiler.localCount > 0 and
+                self.compiler.locals[self.compiler.localCount - 1].depth > self.compiler.scopeDepth)
+            {
+                self.emitByte(@enumToInt(OpCode.POP));
+                self.compiler.localCount -= 1;
+            }
+        }
+
         fn binary(self: *Self, canAssign: bool) void {
             _ = canAssign;
             const operatorType = self.previous.type;
@@ -267,12 +321,23 @@ pub fn Parser(comptime flags: Flags) type {
         }
 
         fn namedVariable(self: *Self, name: Token, canAssign: bool) void {
-            const arg = self.identifierConstant(&name);
+            var getOp: u8 = undefined;
+            var setOp: u8 = undefined;
+            var arg = self.resolveLocal(self.compiler, &name);
+            if (arg != -1) {
+                getOp = @enumToInt(OpCode.GET_LOCAL);
+                setOp = @enumToInt(OpCode.SET_LOCAL);
+            } else {
+                arg = self.identifierConstant(&name);
+                getOp = @enumToInt(OpCode.GET_GLOBAL);
+                setOp = @enumToInt(OpCode.SET_GLOBAL);
+            }
+
             if (canAssign and self.match(TT.EQUAL)) {
                 self.expression();
-                self.emitBytes(@enumToInt(OpCode.SET_GLOBAL), arg);
+                self.emitBytes(setOp, @intCast(u8, arg));
             } else {
-                self.emitBytes(@enumToInt(OpCode.GET_GLOBAL), arg);
+                self.emitBytes(getOp, @intCast(u8, arg));
             }
         }
 
@@ -324,12 +389,78 @@ pub fn Parser(comptime flags: Flags) type {
             return self.makeConstant(.{ .obj = self.objects.copyString(name.value).asObj() });
         }
 
+        fn identifiersEqual(a: *const Token, b: *const Token) bool {
+            if (a.value.len != b.value.len) {
+                return false;
+            }
+            return std.mem.eql(u8, a.value, b.value);
+        }
+
+        fn resolveLocal(self: *Self, compiler: *Compiler, name: *const Token) isize {
+            var i = @intCast(isize, compiler.localCount) - 1;
+            while (i >= 0) : (i -= 1) {
+                const local = compiler.locals[@intCast(usize, i)];
+                if (identifiersEqual(name, &local.name)) {
+                    if (local.depth == -1) {
+                        self.err("Can't read local variable in its own initializer.");
+                    }
+                    return i;
+                }
+            }
+            return -1;
+        }
+
+        fn addLocal(self: *Self, name: Token) void {
+            if (self.compiler.localCount == U8_COUNT) {
+                self.err("Too many local variables in function.");
+                return;
+            }
+
+            var local = &self.compiler.locals[self.compiler.localCount];
+            self.compiler.localCount += 1;
+            local.name = name;
+            local.depth = -1;
+        }
+
+        fn declareVariable(self: *Self) void {
+            if (self.compiler.scopeDepth == 0) {
+                return;
+            }
+            const name = &self.previous;
+            var i = @intCast(isize, self.compiler.localCount) - 1;
+            while (i >= 0) : (i -= 1) {
+                const local = &self.compiler.locals[@intCast(usize, i)];
+                if (local.depth != -1 and local.depth < self.compiler.scopeDepth) {
+                    break;
+                }
+
+                if (identifiersEqual(name, &local.name)) {
+                    self.err("Already a variable with this name in this scope.");
+                }
+            }
+
+            self.addLocal(name.*);
+        }
+
         fn parseVariable(self: *Self, errorMessage: []const u8) u8 {
             self.consume(TT.IDENTIFIER, errorMessage);
+            self.declareVariable();
+            if (self.compiler.scopeDepth > 0) {
+                return 0;
+            }
             return self.identifierConstant(&self.previous);
         }
 
+        fn markInitialized(self: *Self) void {
+            self.compiler.locals[self.compiler.localCount - 1].depth =
+                @intCast(isize, self.compiler.scopeDepth);
+        }
+
         fn defineVariable(self: *Self, global: u8) void {
+            if (self.compiler.scopeDepth > 0) {
+                self.markInitialized();
+                return;
+            }
             self.emitBytes(@enumToInt(OpCode.DEFINE_GLOBAL), global);
         }
 

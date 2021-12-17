@@ -128,6 +128,14 @@ pub fn VM(comptime flags: Flags) type {
                     @enumToInt(OpCode.POP) => {
                         _ = self.pop();
                     },
+                    @enumToInt(OpCode.GET_LOCAL) => {
+                        const slot = self.readByte();
+                        self.push(self.stack[slot]);
+                    },
+                    @enumToInt(OpCode.SET_LOCAL) => {
+                        const slot = self.readByte();
+                        self.stack[slot] = self.peek(0);
+                    },
                     @enumToInt(OpCode.GET_GLOBAL) => {
                         const name = self.readString();
                         var value: Value = undefined;
