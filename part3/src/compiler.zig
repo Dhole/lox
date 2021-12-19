@@ -138,6 +138,51 @@ pub fn Parser(comptime flags: Flags) type {
             self.emitByte(@enumToInt(OpCode.POP));
         }
 
+        fn forStatement(self: *Self) void {
+            self.beginScope();
+            self.consume(TT.LEFT_PAREN, "Expect '(' after 'for'.");
+            if (self.match(TT.SEMICOLON)) {
+                // No initializer.
+            } else if (self.match(TT.VAR)) {
+                self.varDeclaration();
+            } else {
+                self.expressionStatement();
+            }
+
+            var loopStart = self.currentChunk().count;
+            var exitJump: isize = -1;
+            if (!self.match(TT.SEMICOLON)) {
+                self.expression();
+                self.consume(TT.SEMICOLON, "Expect ';' after loop condition.");
+
+                // Jump out of the loop if the condition is false.
+                exitJump = @intCast(isize, self.emitJump(OpCode.JUMP_IF_FALSE));
+                self.emitByte(@enumToInt(OpCode.POP)); // Condition.
+            }
+
+            if (!self.match(TT.RIGHT_PAREN)) {
+                const bodyJump = self.emitJump(OpCode.JUMP);
+                const incrementStart = self.currentChunk().count;
+                self.expression();
+                self.emitByte(@enumToInt(OpCode.POP));
+                self.consume(TT.RIGHT_PAREN, "Expect ')' after for clauses.");
+
+                self.emitLoop(loopStart);
+                loopStart = incrementStart;
+                self.patchJump(bodyJump);
+            }
+
+            self.statement();
+            self.emitLoop(loopStart);
+
+            if (exitJump != -1) {
+                self.patchJump(@intCast(usize, exitJump));
+                self.emitByte(@enumToInt(OpCode.POP)); // Condition
+            }
+
+            self.endScope();
+        }
+
         fn ifStatement(self: *Self) void {
             self.consume(TT.LEFT_PAREN, "Expect '(' after 'if'.");
             self.expression();
@@ -206,6 +251,8 @@ pub fn Parser(comptime flags: Flags) type {
         fn statement(self: *Self) void {
             if (self.match(TT.PRINT)) {
                 self.printStatement();
+            } else if (self.match(TT.FOR)) {
+                self.forStatement();
             } else if (self.match(TT.IF)) {
                 self.ifStatement();
             } else if (self.match(TT.WHILE)) {
