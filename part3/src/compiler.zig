@@ -138,10 +138,43 @@ pub fn Parser(comptime flags: Flags) type {
             self.emitByte(@enumToInt(OpCode.POP));
         }
 
+        fn ifStatement(self: *Self) void {
+            self.consume(TT.LEFT_PAREN, "Expect '(' after 'if'.");
+            self.expression();
+            self.consume(TT.RIGHT_PAREN, "Expect ')' after condition.");
+
+            const thenJump = self.emitJump(OpCode.JUMP_IF_FALSE);
+            self.emitByte(@enumToInt(OpCode.POP));
+            self.statement();
+            const elseJump = self.emitJump(OpCode.JUMP);
+            self.patchJump(thenJump);
+            self.emitByte(@enumToInt(OpCode.POP));
+
+            if (self.match(TT.ELSE)) {
+                self.statement();
+            }
+            self.patchJump(elseJump);
+        }
+
         fn printStatement(self: *Self) void {
             self.expression();
             self.consume(TT.SEMICOLON, "Expect ';' after value.");
             self.emitByte(@enumToInt(OpCode.PRINT));
+        }
+
+        fn whileStatement(self: *Self) void {
+            const loopStart = self.currentChunk().count;
+            self.consume(TT.LEFT_PAREN, "Expect '(' after 'while'.");
+            self.expression();
+            self.consume(TT.RIGHT_PAREN, "Expect ')' after condition.");
+
+            const exitJump = self.emitJump(OpCode.JUMP_IF_FALSE);
+            self.emitByte(@enumToInt(OpCode.POP));
+            self.statement();
+            self.emitLoop(loopStart);
+
+            self.patchJump(exitJump);
+            self.emitByte(@enumToInt(OpCode.POP));
         }
 
         fn synchronize(self: *Self) void {
@@ -173,6 +206,10 @@ pub fn Parser(comptime flags: Flags) type {
         fn statement(self: *Self) void {
             if (self.match(TT.PRINT)) {
                 self.printStatement();
+            } else if (self.match(TT.IF)) {
+                self.ifStatement();
+            } else if (self.match(TT.WHILE)) {
+                self.whileStatement();
             } else if (self.match(TT.LEFT_BRACE)) {
                 self.beginScope();
                 self.block();
@@ -228,12 +265,43 @@ pub fn Parser(comptime flags: Flags) type {
             self.emitByte(byte2);
         }
 
+        fn emitLoop(self: *Self, loopStart: usize) void {
+            self.emitByte(@enumToInt(OpCode.LOOP));
+
+            const offset = self.currentChunk().count - loopStart + 2;
+            if (offset > std.math.maxInt(u16)) {
+                self.err("Loop body too large.");
+            }
+
+            self.emitByte(@intCast(u8, (offset >> 8) & 0xff));
+            self.emitByte(@intCast(u8, offset & 0xff));
+        }
+
+        fn emitJump(self: *Self, instruction: OpCode) usize {
+            self.emitByte(@enumToInt(instruction));
+            self.emitByte(0xff);
+            self.emitByte(0xff);
+            return self.currentChunk().count - 2;
+        }
+
         fn emitReturn(self: *Self) void {
             self.emitByte(@enumToInt(OpCode.RETURN));
         }
 
         fn emitConstant(self: *Self, value: Value) void {
             self.emitBytes(@enumToInt(OpCode.CONSTANT), self.makeConstant(value));
+        }
+
+        fn patchJump(self: *Self, offset: usize) void {
+            // -2 to adjust for the bytecode for the jump offset itself.
+            const jump = self.currentChunk().count - offset - 2;
+
+            if (jump > std.math.maxInt(u16)) {
+                self.err("Too much code to jump over.");
+            }
+
+            self.currentChunk().code[offset] = @intCast(u8, (jump >> 8) & 0xff);
+            self.currentChunk().code[offset + 1] = @intCast(u8, jump & 0xff);
         }
 
         fn makeConstant(self: *Self, value: Value) u8 {
@@ -312,6 +380,18 @@ pub fn Parser(comptime flags: Flags) type {
                 std.debug.panic("{}", .{e});
             };
             _ = self.emitConstant(.{ .number = value });
+        }
+
+        fn or_(self: *Self, canAssign: bool) void {
+            _ = canAssign;
+            const elseJump = self.emitJump(OpCode.JUMP_IF_FALSE);
+            const endJump = self.emitJump(OpCode.JUMP);
+
+            self.patchJump(elseJump);
+            self.emitByte(@enumToInt(OpCode.POP));
+
+            self.parsePrecedence(Precedence.OR);
+            self.patchJump(endJump);
         }
 
         fn string(self: *Self, canAssign: bool) void {
@@ -464,6 +544,14 @@ pub fn Parser(comptime flags: Flags) type {
             self.emitBytes(@enumToInt(OpCode.DEFINE_GLOBAL), global);
         }
 
+        fn and_(self: *Self, canAssign: bool) void {
+            _ = canAssign;
+            const endJump = self.emitJump(OpCode.JUMP_IF_FALSE);
+            self.emitByte(@enumToInt(OpCode.POP));
+            self.parsePrecedence(Precedence.AND);
+            self.patchJump(endJump);
+        }
+
         fn getRule(typ: TT) *ParseRule {
             return &Self.rules[@enumToInt(typ)];
         }
@@ -519,7 +607,7 @@ pub fn Parser(comptime flags: Flags) type {
             _rules[@enumToInt(TT.IDENTIFIER)] = .{ .prefix = &variable, .infix = null, .precedence = Precedence.NONE };
             _rules[@enumToInt(TT.STRING)] = .{ .prefix = &string, .infix = null, .precedence = Precedence.NONE };
             _rules[@enumToInt(TT.NUMBER)] = .{ .prefix = &number, .infix = null, .precedence = Precedence.NONE };
-            _rules[@enumToInt(TT.AND)] = .{ .prefix = null, .infix = null, .precedence = Precedence.NONE };
+            _rules[@enumToInt(TT.AND)] = .{ .prefix = null, .infix = &and_, .precedence = Precedence.AND };
             _rules[@enumToInt(TT.CLASS)] = .{ .prefix = null, .infix = null, .precedence = Precedence.NONE };
             _rules[@enumToInt(TT.ELSE)] = .{ .prefix = null, .infix = null, .precedence = Precedence.NONE };
             _rules[@enumToInt(TT.FALSE)] = .{ .prefix = &literal, .infix = null, .precedence = Precedence.NONE };
@@ -527,7 +615,7 @@ pub fn Parser(comptime flags: Flags) type {
             _rules[@enumToInt(TT.FUN)] = .{ .prefix = null, .infix = null, .precedence = Precedence.NONE };
             _rules[@enumToInt(TT.IF)] = .{ .prefix = null, .infix = null, .precedence = Precedence.NONE };
             _rules[@enumToInt(TT.NIL)] = .{ .prefix = &literal, .infix = null, .precedence = Precedence.NONE };
-            _rules[@enumToInt(TT.OR)] = .{ .prefix = null, .infix = null, .precedence = Precedence.NONE };
+            _rules[@enumToInt(TT.OR)] = .{ .prefix = null, .infix = &or_, .precedence = Precedence.OR };
             _rules[@enumToInt(TT.PRINT)] = .{ .prefix = null, .infix = null, .precedence = Precedence.NONE };
             _rules[@enumToInt(TT.RETURN)] = .{ .prefix = null, .infix = null, .precedence = Precedence.NONE };
             _rules[@enumToInt(TT.SUPER)] = .{ .prefix = null, .infix = null, .precedence = Precedence.NONE };

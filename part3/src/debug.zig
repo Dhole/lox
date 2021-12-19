@@ -30,6 +30,9 @@ pub fn disassembleInstruction(chunk: *Chunk, offset: usize) usize {
     const instruction = chunk.code[offset];
     return switch (instruction) {
         @enumToInt(OpCode.PRINT) => simpleInstruction("OP_PRINT", offset),
+        @enumToInt(OpCode.JUMP) => jumpInstruction("OP_JUMP", 1, chunk, offset),
+        @enumToInt(OpCode.JUMP_IF_FALSE) => jumpInstruction("OP_JUMP_IF_FALSE", 1, chunk, offset),
+        @enumToInt(OpCode.LOOP) => jumpInstruction("OP_LOOP", -1, chunk, offset),
         @enumToInt(OpCode.RETURN) => simpleInstruction("OP_RETURN", offset),
         @enumToInt(OpCode.CONSTANT) => constantInstruction("OP_CONSTANT", chunk, offset),
         @enumToInt(OpCode.NIL) => simpleInstruction("OP_NIL", offset),
@@ -64,7 +67,7 @@ fn simpleInstruction(name: []const u8, offset: usize) usize {
 
 fn constantInstruction(name: []const u8, chunk: *Chunk, offset: usize) usize {
     const constant = chunk.code[offset + 1];
-    print("{s} {d: >4} ", .{ name, constant });
+    print("{s: <16} {d: >4} ", .{ name, constant });
     printValue(chunk.constants.values[constant]);
     print("\n", .{});
     return offset + 2;
@@ -72,6 +75,13 @@ fn constantInstruction(name: []const u8, chunk: *Chunk, offset: usize) usize {
 
 fn byteInstruction(name: []const u8, chunk: *Chunk, offset: usize) usize {
     const slot = chunk.code[offset + 1];
-    print("{s} {d: >4}\n", .{ name, slot });
+    print("{s: <16} {d: >4}\n", .{ name, slot });
     return offset + 2;
+}
+
+fn jumpInstruction(name: []const u8, sign: isize, chunk: *Chunk, offset: usize) usize {
+    const jump = @intCast(u16, chunk.code[offset + 1]) << 8 |
+        @intCast(u16, chunk.code[offset + 2]);
+    print("{s: <16} {d: >4} -> {d}\n", .{ name, offset, @intCast(isize, offset) + 3 + sign * @intCast(isize, jump) });
+    return offset + 3;
 }

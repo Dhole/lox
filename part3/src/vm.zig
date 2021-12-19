@@ -79,9 +79,9 @@ pub fn VM(comptime flags: Flags) type {
             return self.stack[self.stackTop];
         }
 
-        pub fn ip(self: *Self) u8 {
-            return self.chunk.code[self.pc];
-        }
+        // pub fn ip(self: *Self) u8 {
+        //     return self.chunk.code[self.pc];
+        // }
 
         pub fn interpret(self: *Self, source: []const u8) InterpretResult {
             var chunk = Chunk.init();
@@ -195,9 +195,23 @@ pub fn VM(comptime flags: Flags) type {
                     @enumToInt(OpCode.MULTIPLY) => try self.binaryOp(f64, f64, Value.initNumber, mul),
                     @enumToInt(OpCode.DIVIDE) => try self.binaryOp(f64, f64, Value.initNumber, div),
                     @enumToInt(OpCode.NOT) => self.push(.{ .boolean = isFalsey(self.pop()) }),
+                    @enumToInt(OpCode.JUMP) => {
+                        const offset = self.readShort();
+                        self.pc += offset;
+                    },
+                    @enumToInt(OpCode.JUMP_IF_FALSE) => {
+                        const offset = self.readShort();
+                        if (isFalsey(self.peek(0))) {
+                            self.pc += offset;
+                        }
+                    },
                     @enumToInt(OpCode.PRINT) => {
                         printValue(self.pop());
                         print("\n", .{});
+                    },
+                    @enumToInt(OpCode.LOOP) => {
+                        const offset = self.readShort();
+                        self.pc -= offset;
                     },
                     @enumToInt(OpCode.RETURN) => {
                         return;
@@ -256,7 +270,7 @@ pub fn VM(comptime flags: Flags) type {
         }
 
         fn readByte(self: *Self) u8 {
-            const b = self.ip();
+            const b = self.chunk.code[self.pc];
             self.pc += 1;
             return b;
         }
@@ -267,6 +281,12 @@ pub fn VM(comptime flags: Flags) type {
 
         fn readString(self: *Self) *ObjString {
             return self.readConstant().obj.asString();
+        }
+
+        fn readShort(self: *Self) u16 {
+            self.pc += 2;
+            return @intCast(u16, self.chunk.code[self.pc - 2]) << 8 |
+                @intCast(u16, self.chunk.code[self.pc - 1]);
         }
 
         fn peek(self: *Self, distance: usize) Value {
