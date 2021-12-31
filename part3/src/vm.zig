@@ -19,11 +19,21 @@ const printValue = _value.printValue;
 const disassembleInstruction = _debug.disassembleInstruction;
 const Parser = _compiler.Parser;
 const Flags = _common.Flags;
+const U8_COUNT = _common.U8_COUNT;
 const Obj = _object.Obj;
 const ObjString = _object.ObjString;
 const Objects = _object.Objects;
+const ObjFunction = _object.ObjFunction;
+const ObjType = _object.ObjType;
 const allocate = _memory.allocate;
 const Table = _table.Table;
+
+pub const CallFrame = struct {
+    function: *ObjFunction,
+    pc: usize,
+    // slots: []Value,
+    slots: usize,
+};
 
 pub const InterpretResult = enum {
     OK,
@@ -36,14 +46,16 @@ pub const InterpretError = error{
     Runtime,
 };
 
-pub const STACK_MAX: usize = 256;
+pub const FRAMES_MAX: usize = 64;
+pub const STACK_MAX: usize = FRAMES_MAX * U8_COUNT;
 
 pub fn VM(comptime flags: Flags) type {
     return struct {
         const Self = @This();
 
-        chunk: *Chunk,
-        pc: usize,
+        frame: *CallFrame,
+        frames: [FRAMES_MAX]CallFrame,
+        frameCount: usize,
         stack: [STACK_MAX]Value,
         stackTop: usize,
         globals: Table,
@@ -51,10 +63,11 @@ pub fn VM(comptime flags: Flags) type {
 
         pub fn init() Self {
             return Self{
-                .chunk = undefined,
-                .pc = undefined,
+                .frame = undefined,
+                .frames = undefined,
                 .stack = undefined,
                 .stackTop = 0,
+                .frameCount = 0,
                 .globals = Table.init(),
                 .objects = Objects.init(),
             };
@@ -67,14 +80,17 @@ pub fn VM(comptime flags: Flags) type {
 
         pub fn resetStack(self: *Self) void {
             self.stackTop = 0;
+            self.frameCount = 0;
         }
 
         pub fn push(self: *Self, value: Value) void {
             self.stack[self.stackTop] = value;
             self.stackTop += 1;
+            std.log.debug("DBG push {d}", .{self.stackTop});
         }
 
         pub fn pop(self: *Self) Value {
+            std.log.debug("DBG pop {d}", .{self.stackTop});
             self.stackTop -= 1;
             return self.stack[self.stackTop];
         }
@@ -84,14 +100,19 @@ pub fn VM(comptime flags: Flags) type {
         // }
 
         pub fn interpret(self: *Self, source: []const u8) InterpretResult {
-            var chunk = Chunk.init();
             var parser = Parser(flags).init();
-            defer chunk.deinit();
-            if (!parser.compile(&self.objects, source, &chunk)) {
-                return InterpretResult.COMPILE_ERROR;
+
+            const function = blk: {
+                if (parser.compile(&self.objects, source)) |fun| {
+                    break :blk fun;
+                } else {
+                    return InterpretResult.COMPILE_ERROR;
+                }
+            };
+            self.push(.{ .obj = function.asObj() });
+            if (!self.call(function, 0)) {
+                @panic("script call");
             }
-            self.chunk = &chunk;
-            self.pc = 0;
 
             self.run() catch |err| {
                 switch (err) {
@@ -103,6 +124,8 @@ pub fn VM(comptime flags: Flags) type {
         }
 
         fn run(self: *Self) InterpretError!void {
+            self.frame = &self.frames[self.frameCount - 1];
+
             while (true) {
                 if (flags.debugTraceExecution) {
                     print("          ", .{});
@@ -113,7 +136,7 @@ pub fn VM(comptime flags: Flags) type {
                         print(" ]", .{});
                     }
                     print("\n", .{});
-                    _ = disassembleInstruction(self.chunk, self.pc);
+                    _ = disassembleInstruction(&self.frame.function.chunk, self.frame.pc);
                 }
 
                 const instruction = self.readByte();
@@ -130,11 +153,11 @@ pub fn VM(comptime flags: Flags) type {
                     },
                     @enumToInt(OpCode.GET_LOCAL) => {
                         const slot = self.readByte();
-                        self.push(self.stack[slot]);
+                        self.push(self.stack[self.frame.slots + slot]);
                     },
                     @enumToInt(OpCode.SET_LOCAL) => {
                         const slot = self.readByte();
-                        self.stack[slot] = self.peek(0);
+                        self.stack[self.frame.slots + slot] = self.peek(0);
                     },
                     @enumToInt(OpCode.GET_GLOBAL) => {
                         const name = self.readString();
@@ -197,12 +220,12 @@ pub fn VM(comptime flags: Flags) type {
                     @enumToInt(OpCode.NOT) => self.push(.{ .boolean = isFalsey(self.pop()) }),
                     @enumToInt(OpCode.JUMP) => {
                         const offset = self.readShort();
-                        self.pc += offset;
+                        self.frame.pc += offset;
                     },
                     @enumToInt(OpCode.JUMP_IF_FALSE) => {
                         const offset = self.readShort();
                         if (isFalsey(self.peek(0))) {
-                            self.pc += offset;
+                            self.frame.pc += offset;
                         }
                     },
                     @enumToInt(OpCode.PRINT) => {
@@ -211,10 +234,25 @@ pub fn VM(comptime flags: Flags) type {
                     },
                     @enumToInt(OpCode.LOOP) => {
                         const offset = self.readShort();
-                        self.pc -= offset;
+                        self.frame.pc -= offset;
+                    },
+                    @enumToInt(OpCode.CALL) => {
+                        const argCount = self.readByte();
+                        if (!self.callValue(self.peek(argCount), argCount)) {
+                            return InterpretError.Runtime;
+                        }
+                        self.frame = &self.frames[self.frameCount - 1];
                     },
                     @enumToInt(OpCode.RETURN) => {
-                        return;
+                        const result = self.pop();
+                        self.frameCount -= 1;
+                        if (self.frameCount == 0) {
+                            _ = self.pop();
+                            return;
+                        }
+                        self.stackTop = self.frame.slots;
+                        self.push(result);
+                        self.frame = &self.frames[self.frameCount - 1];
                     },
                     else => {
                         return InterpretError.Runtime;
@@ -270,13 +308,13 @@ pub fn VM(comptime flags: Flags) type {
         }
 
         fn readByte(self: *Self) u8 {
-            const b = self.chunk.code[self.pc];
-            self.pc += 1;
+            const b = self.frame.function.chunk.code[self.frame.pc];
+            self.frame.pc += 1;
             return b;
         }
 
         fn readConstant(self: *Self) Value {
-            return self.chunk.constants.values[self.readByte()];
+            return self.frame.function.chunk.constants.values[self.readByte()];
         }
 
         fn readString(self: *Self) *ObjString {
@@ -284,13 +322,45 @@ pub fn VM(comptime flags: Flags) type {
         }
 
         fn readShort(self: *Self) u16 {
-            self.pc += 2;
-            return @intCast(u16, self.chunk.code[self.pc - 2]) << 8 |
-                @intCast(u16, self.chunk.code[self.pc - 1]);
+            self.frame.pc += 2;
+            return @intCast(u16, self.frame.function.chunk.code[self.frame.pc - 2]) << 8 |
+                @intCast(u16, self.frame.function.chunk.code[self.frame.pc - 1]);
         }
 
         fn peek(self: *Self, distance: usize) Value {
             return self.stack[self.stackTop - 1 - distance];
+        }
+
+        fn call(self: *Self, function: *ObjFunction, argCount: usize) bool {
+            if (argCount != function.arity) {
+                self.runtimeError("Expected {d} arguments but got {d}.", .{ function.arity, argCount });
+                return false;
+            }
+            if (self.frameCount == FRAMES_MAX) {
+                self.runtimeError("Stack overflow.", .{});
+                return false;
+            }
+
+            var frame = &self.frames[self.frameCount];
+            self.frameCount += 1;
+            frame.function = function;
+            frame.pc = 0;
+            frame.slots = self.stackTop - argCount - 1; // self.stack[self.stackTop - argCount - 1 ..];
+            return true;
+        }
+
+        fn callValue(self: *Self, callee: Value, argCount: u8) bool {
+            switch (callee) {
+                Value.obj => |obj| {
+                    switch (obj.type) {
+                        ObjType.function => return self.call(obj.asFunction(), argCount),
+                        else => {}, // Non-callable object type.
+                    }
+                },
+                else => {},
+            }
+            self.runtimeError("Can only call functions and classes.", .{});
+            return false;
         }
 
         fn isFalsey(value: Value) bool {
@@ -315,9 +385,19 @@ pub fn VM(comptime flags: Flags) type {
 
         fn runtimeError(self: *Self, comptime fmt: []const u8, args: anytype) void {
             std.log.err(fmt, args);
-            const instruction = self.pc - 1;
-            const line = self.chunk.lines[instruction];
-            std.log.err("[line {d}] in script", .{line});
+
+            var i = @intCast(isize, self.frameCount - 1);
+            while (i >= 0) : (i -= 1) {
+                const frame = &self.frames[@intCast(usize, i)];
+                const instruction = frame.pc - 1;
+                const line = frame.function.chunk.lines[instruction];
+                if (frame.function.name) |name| {
+                    std.log.err("[line {d}] in {s}()", .{ line, name.chars });
+                } else {
+                    std.log.err("[line {d}] in script", .{line});
+                }
+            }
+
             self.resetStack();
         }
     };

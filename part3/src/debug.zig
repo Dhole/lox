@@ -33,6 +33,7 @@ pub fn disassembleInstruction(chunk: *Chunk, offset: usize) usize {
         @enumToInt(OpCode.JUMP) => jumpInstruction("OP_JUMP", 1, chunk, offset),
         @enumToInt(OpCode.JUMP_IF_FALSE) => jumpInstruction("OP_JUMP_IF_FALSE", 1, chunk, offset),
         @enumToInt(OpCode.LOOP) => jumpInstruction("OP_LOOP", -1, chunk, offset),
+        @enumToInt(OpCode.CALL) => byteInstruction("OP_CALL", chunk, offset),
         @enumToInt(OpCode.RETURN) => simpleInstruction("OP_RETURN", offset),
         @enumToInt(OpCode.CONSTANT) => constantInstruction("OP_CONSTANT", chunk, offset),
         @enumToInt(OpCode.NIL) => simpleInstruction("OP_NIL", offset),

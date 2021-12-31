@@ -2,6 +2,7 @@ const std = @import("std");
 
 const _memory = @import("memory.zig");
 const _table = @import("table.zig");
+const _chunk = @import("chunk.zig");
 
 const print = std.debug.print;
 const allocate = _memory.allocate;
@@ -9,6 +10,7 @@ const create = _memory.create;
 const destroy = _memory.destroy;
 const freeArray = _memory.freeArray;
 const Table = _table.Table;
+const Chunk = _chunk.Chunk;
 
 fn hashString(key: []const u8) u32 {
     var hash: u32 = 2166136261;
@@ -95,6 +97,7 @@ pub const ObjString = struct {
 };
 
 pub const ObjType = enum {
+    function,
     string,
 };
 
@@ -108,9 +111,18 @@ pub const Obj = struct {
         return @ptrCast(*ObjString, self);
     }
 
+    pub fn asFunction(self: *Self) *ObjFunction {
+        return @ptrCast(*ObjFunction, self);
+    }
+
     // freeObject
     pub fn deinit(self: *Self) void {
         switch (self.type) {
+            ObjType.function => {
+                var function = self.asFunction();
+                function.chunk.deinit();
+                destroy(function);
+            },
             ObjType.string => {
                 var string = self.asString();
                 freeArray(u8, string.chars);
@@ -122,9 +134,39 @@ pub const Obj = struct {
 
 pub fn printObject(obj: *Obj) void {
     switch (obj.type) {
+        ObjType.function => printFunction(obj.asFunction()),
         ObjType.string => print("\"{s}\"", .{obj.asString().chars}),
     }
 }
+
+fn printFunction(function: *ObjFunction) void {
+    if (function.name) |name| {
+        print("<fn {s}>", .{name.chars});
+    } else {
+        print("<script>", .{});
+    }
+}
+
+pub const ObjFunction = struct {
+    const Self = @This();
+
+    obj: Obj,
+    arity: usize,
+    chunk: Chunk,
+    name: ?*ObjString,
+
+    pub fn init(objects: *Objects) *Self {
+        var function = objects.allocateObject(ObjFunction, ObjType.function);
+        function.arity = 0;
+        function.name = null;
+        function.chunk = Chunk.init();
+        return function;
+    }
+
+    pub fn asObj(self: *Self) *Obj {
+        return @ptrCast(*Obj, self);
+    }
+};
 
 // pub const Obj = struct {
 //     type: ObjType,

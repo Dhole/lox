@@ -18,8 +18,10 @@ const Scanner = _scanner.Scanner;
 const Token = _token.Token;
 const TT = _token.TokenType;
 const Flags = _common.Flags;
+const U8_COUNT = _common.U8_COUNT;
 const copyString = _object.copyString;
 const Obj = _object.Obj;
+const ObjFunction = _object.ObjFunction;
 const Objects = _object.Objects;
 
 const Precedence = enum { //
@@ -40,17 +42,26 @@ pub const Local = struct {
     depth: isize,
 };
 
-const U8_COUNT = maxInt(u8) + 1;
+pub const FunctionType = enum {
+    FUNCTION,
+    SCRIPT,
+};
 
 pub const Compiler = struct {
     const Self = @This();
 
+    enclosing: ?*Compiler,
+    function: *ObjFunction,
+    type: FunctionType,
     locals: [U8_COUNT]Local,
     localCount: usize,
     scopeDepth: usize,
 
-    pub fn init() Self {
+    pub fn init(objects: *Objects, typ: FunctionType, enclosing: ?*Compiler) Self {
         return Self{
+            .enclosing = enclosing,
+            .function = ObjFunction.init(objects),
+            .type = typ,
             .locals = undefined,
             .localCount = 0,
             .scopeDepth = 0,
@@ -73,7 +84,6 @@ pub fn Parser(comptime flags: Flags) type {
 
         current: Token,
         previous: Token,
-        compilingChunk: *Chunk,
         scanner: *Scanner,
         // current in the book
         compiler: *Compiler,
@@ -85,7 +95,6 @@ pub fn Parser(comptime flags: Flags) type {
             return Self{
                 .current = undefined,
                 .previous = undefined,
-                .compilingChunk = undefined,
                 .scanner = undefined,
                 .compiler = undefined,
                 .objects = undefined,
@@ -94,20 +103,29 @@ pub fn Parser(comptime flags: Flags) type {
             };
         }
 
-        pub fn compile(self: *Self, objects: *Objects, source: []const u8, chunk: *Chunk) bool {
-            self.compilingChunk = chunk;
+        pub fn compile(self: *Self, objects: *Objects, source: []const u8) ?*ObjFunction {
+            self.objects = objects;
             self.hadError = false;
             self.panicMode = false;
             self.scanner = &Scanner.init(source);
-            self.compiler = &Compiler.init();
-            self.objects = objects;
+            self.compiler = &Compiler.init(self.objects, FunctionType.SCRIPT, null);
+
+            var local = &self.compiler.locals[self.compiler.localCount];
+            self.compiler.localCount += 1;
+            local.depth = 0;
+            local.name.value = "";
 
             self.advance();
             while (!self.match(TT.EOF)) {
                 self.declaration();
             }
-            self.endCompiler();
-            return !self.hadError;
+
+            const fun = self.endCompiler();
+            if (self.hadError) {
+                return null;
+            } else {
+                return fun;
+            }
         }
 
         fn expression(self: *Self) void {
@@ -119,6 +137,42 @@ pub fn Parser(comptime flags: Flags) type {
                 self.declaration();
             }
             self.consume(TT.RIGHT_BRACE, "Expect '}' after block.");
+        }
+
+        fn function(self: *Self, typ: FunctionType) void {
+            self.compiler = &Compiler.init(self.objects, typ, self.compiler);
+            self.compiler.function.name = self.objects.copyString(self.previous.value);
+            self.beginScope();
+
+            self.consume(TT.LEFT_PAREN, "Expect '(' after function name.");
+
+            if (!self.check(TT.RIGHT_PAREN)) {
+                while (true) {
+                    self.compiler.function.arity += 1;
+                    if (self.compiler.function.arity > 255) {
+                        self.errAtCurrent("Can't have more than 255 parameters.");
+                    }
+                    const constant = self.parseVariable("Expect parameter name.");
+                    self.defineVariable(constant);
+                    if (!self.match(TT.COMMA)) {
+                        break;
+                    }
+                }
+            }
+
+            self.consume(TT.RIGHT_PAREN, "Expect ')' after parameters.");
+            self.consume(TT.LEFT_BRACE, "Expect '{' before function body.");
+            self.block();
+
+            const fun = self.endCompiler();
+            self.emitBytes(@enumToInt(OpCode.CONSTANT), self.makeConstant(.{ .obj = fun.asObj() }));
+        }
+
+        fn funDeclaration(self: *Self) void {
+            const global = self.parseVariable("Expect function name.");
+            self.markInitialized();
+            self.function(FunctionType.FUNCTION);
+            self.defineVariable(global);
         }
 
         fn varDeclaration(self: *Self) void {
@@ -207,6 +261,20 @@ pub fn Parser(comptime flags: Flags) type {
             self.emitByte(@enumToInt(OpCode.PRINT));
         }
 
+        fn returnStatement(self: *Self) void {
+            if (self.compiler.type == FunctionType.SCRIPT) {
+                self.err("Can't return from top-level code.");
+            }
+
+            if (self.match(TT.SEMICOLON)) {
+                self.emitReturn();
+            } else {
+                self.expression();
+                self.consume(TT.SEMICOLON, "Expect ';' after return value.");
+                self.emitByte(@enumToInt(OpCode.RETURN));
+            }
+        }
+
         fn whileStatement(self: *Self) void {
             const loopStart = self.currentChunk().count;
             self.consume(TT.LEFT_PAREN, "Expect '(' after 'while'.");
@@ -238,7 +306,9 @@ pub fn Parser(comptime flags: Flags) type {
         }
 
         fn declaration(self: *Self) void {
-            if (self.match(TT.VAR)) {
+            if (self.match(TT.FUN)) {
+                self.funDeclaration();
+            } else if (self.match(TT.VAR)) {
                 self.varDeclaration();
             } else {
                 self.statement();
@@ -255,6 +325,8 @@ pub fn Parser(comptime flags: Flags) type {
                 self.forStatement();
             } else if (self.match(TT.IF)) {
                 self.ifStatement();
+            } else if (self.match(TT.RETURN)) {
+                self.returnStatement();
             } else if (self.match(TT.WHILE)) {
                 self.whileStatement();
             } else if (self.match(TT.LEFT_BRACE)) {
@@ -267,7 +339,7 @@ pub fn Parser(comptime flags: Flags) type {
         }
 
         fn currentChunk(self: *Self) *Chunk {
-            return self.compilingChunk;
+            return &self.compiler.function.chunk;
         }
 
         pub fn advance(self: *Self) void {
@@ -332,6 +404,7 @@ pub fn Parser(comptime flags: Flags) type {
         }
 
         fn emitReturn(self: *Self) void {
+            self.emitByte(@enumToInt(OpCode.NIL));
             self.emitByte(@enumToInt(OpCode.RETURN));
         }
 
@@ -360,13 +433,22 @@ pub fn Parser(comptime flags: Flags) type {
             return @intCast(u8, constant);
         }
 
-        fn endCompiler(self: *Self) void {
+        fn endCompiler(self: *Self) *ObjFunction {
             self.emitReturn();
+            const fun = self.compiler.function;
             if (flags.debugPrintCode) {
                 if (!self.hadError) {
-                    debug.disassembleChunk(self.currentChunk(), "code");
+                    var name: []const u8 = "<script>";
+                    if (fun.name) |n| {
+                        name = n.chars;
+                    }
+                    debug.disassembleChunk(self.currentChunk(), name);
                 }
             }
+            if (self.compiler.enclosing) |compiler| {
+                self.compiler = compiler;
+            }
+            return fun;
         }
 
         fn beginScope(self: *Self) void {
@@ -403,6 +485,12 @@ pub fn Parser(comptime flags: Flags) type {
                 TT.SLASH => self.emitByte(@enumToInt(OpCode.DIVIDE)),
                 else => unreachable, // Unreachable.
             }
+        }
+
+        fn call(self: *Self, canAssign: bool) void {
+            _ = canAssign;
+            const argCount = self.argumentList();
+            self.emitBytes(@enumToInt(OpCode.CALL), argCount);
         }
 
         fn literal(self: *Self, canAssign: bool) void {
@@ -579,6 +667,9 @@ pub fn Parser(comptime flags: Flags) type {
         }
 
         fn markInitialized(self: *Self) void {
+            if (self.compiler.scopeDepth == 0) {
+                return;
+            }
             self.compiler.locals[self.compiler.localCount - 1].depth =
                 @intCast(isize, self.compiler.scopeDepth);
         }
@@ -589,6 +680,24 @@ pub fn Parser(comptime flags: Flags) type {
                 return;
             }
             self.emitBytes(@enumToInt(OpCode.DEFINE_GLOBAL), global);
+        }
+
+        fn argumentList(self: *Self) u8 {
+            var argCount: u8 = 0;
+            if (!self.check(TT.RIGHT_PAREN)) {
+                while (true) {
+                    self.expression();
+                    if (argCount == 255) {
+                        self.err("Can't have more than 255 arguments.");
+                    }
+                    argCount += 1;
+                    if (!self.match(TT.COMMA)) {
+                        break;
+                    }
+                }
+            }
+            self.consume(TT.RIGHT_PAREN, "Expect ')' after arguments.");
+            return argCount;
         }
 
         fn and_(self: *Self, canAssign: bool) void {
@@ -632,7 +741,7 @@ pub fn Parser(comptime flags: Flags) type {
 
         fn genRules() []ParseRule {
             var _rules: [@enumToInt(TT.ERROR) + 1]ParseRule = undefined;
-            _rules[@enumToInt(TT.LEFT_PAREN)] = .{ .prefix = &grouping, .infix = null, .precedence = Precedence.NONE };
+            _rules[@enumToInt(TT.LEFT_PAREN)] = .{ .prefix = &grouping, .infix = &call, .precedence = Precedence.CALL };
             _rules[@enumToInt(TT.RIGHT_PAREN)] = .{ .prefix = null, .infix = null, .precedence = Precedence.NONE };
             _rules[@enumToInt(TT.LEFT_BRACE)] = .{ .prefix = null, .infix = null, .precedence = Precedence.NONE };
             _rules[@enumToInt(TT.RIGHT_BRACE)] = .{ .prefix = null, .infix = null, .precedence = Precedence.NONE };

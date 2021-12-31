@@ -1,3 +1,7 @@
+const std = @import("std");
+
+const maxInt = std.math.maxInt;
+
 pub const OpCode = enum {
     CONSTANT,
     NIL,
@@ -22,6 +26,7 @@ pub const OpCode = enum {
     JUMP,
     JUMP_IF_FALSE,
     LOOP,
+    CALL,
     RETURN,
 };
 
@@ -29,3 +34,5 @@ pub const Flags = struct {
     debugTraceExecution: bool,
     debugPrintCode: bool,
 };
+
+pub const U8_COUNT = maxInt(u8) + 1;
