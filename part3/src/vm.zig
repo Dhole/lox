@@ -25,6 +25,8 @@ const ObjString = _object.ObjString;
 const Objects = _object.Objects;
 const ObjFunction = _object.ObjFunction;
 const ObjType = _object.ObjType;
+const ObjNative = _object.ObjNative;
+const NativeFn = _object.NativeFn;
 const allocate = _memory.allocate;
 const Table = _table.Table;
 
@@ -62,7 +64,7 @@ pub fn VM(comptime flags: Flags) type {
         objects: Objects,
 
         pub fn init() Self {
-            return Self{
+            var self = Self{
                 .frame = undefined,
                 .frames = undefined,
                 .stack = undefined,
@@ -71,6 +73,8 @@ pub fn VM(comptime flags: Flags) type {
                 .globals = Table.init(),
                 .objects = Objects.init(),
             };
+            self.defineNative("clock", clockNative);
+            return self;
         }
 
         pub fn deinit(self: *Self) void {
@@ -86,11 +90,9 @@ pub fn VM(comptime flags: Flags) type {
         pub fn push(self: *Self, value: Value) void {
             self.stack[self.stackTop] = value;
             self.stackTop += 1;
-            std.log.debug("DBG push {d}", .{self.stackTop});
         }
 
         pub fn pop(self: *Self) Value {
-            std.log.debug("DBG pop {d}", .{self.stackTop});
             self.stackTop -= 1;
             return self.stack[self.stackTop];
         }
@@ -354,6 +356,13 @@ pub fn VM(comptime flags: Flags) type {
                 Value.obj => |obj| {
                     switch (obj.type) {
                         ObjType.function => return self.call(obj.asFunction(), argCount),
+                        ObjType.native => {
+                            const native = obj.asNative();
+                            const result = native.function(argCount, self.stack[self.stackTop - argCount ..]);
+                            self.stackTop -= argCount + 1;
+                            self.push(result);
+                            return true;
+                        },
                         else => {}, // Non-callable object type.
                     }
                 },
@@ -400,5 +409,19 @@ pub fn VM(comptime flags: Flags) type {
 
             self.resetStack();
         }
+
+        fn defineNative(self: *Self, name: []const u8, function: NativeFn) void {
+            self.push(.{ .obj = self.objects.copyString(name).asObj() });
+            self.push(.{ .obj = ObjNative.init(&self.objects, function).asObj() });
+            _ = self.globals.set(self.stack[0].obj.asString(), self.stack[1]);
+            _ = self.pop();
+            _ = self.pop();
+        }
     };
+}
+
+fn clockNative(argCount: usize, args: []Value) Value {
+    _ = argCount;
+    _ = args;
+    return .{ .number = @intToFloat(f64, std.time.milliTimestamp()) / 1000.0 };
 }

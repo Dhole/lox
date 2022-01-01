@@ -58,7 +58,7 @@ pub const Compiler = struct {
     scopeDepth: usize,
 
     pub fn init(objects: *Objects, typ: FunctionType, enclosing: ?*Compiler) Self {
-        return Self{
+        var self = Self{
             .enclosing = enclosing,
             .function = ObjFunction.init(objects),
             .type = typ,
@@ -66,6 +66,12 @@ pub const Compiler = struct {
             .localCount = 0,
             .scopeDepth = 0,
         };
+        var local = &self.locals[self.localCount];
+        self.localCount += 1;
+        local.depth = 0;
+        local.name.value = "";
+
+        return self;
     }
 };
 
@@ -109,11 +115,6 @@ pub fn Parser(comptime flags: Flags) type {
             self.panicMode = false;
             self.scanner = &Scanner.init(source);
             self.compiler = &Compiler.init(self.objects, FunctionType.SCRIPT, null);
-
-            var local = &self.compiler.locals[self.compiler.localCount];
-            self.compiler.localCount += 1;
-            local.depth = 0;
-            local.name.value = "";
 
             self.advance();
             while (!self.match(TT.EOF)) {

@@ -18,7 +18,7 @@ var gpa = std.heap.GeneralPurposeAllocator(.{}){};
 var allocator = &gpa.allocator;
 
 pub fn main() anyerror!u8 {
-    const flags = Flags{ .debugTraceExecution = true, .debugPrintCode = true };
+    const flags = Flags{ .debugTraceExecution = false, .debugPrintCode = false };
     var vm = VM(flags).init();
     defer vm.deinit();
 

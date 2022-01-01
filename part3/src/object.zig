@@ -3,6 +3,7 @@ const std = @import("std");
 const _memory = @import("memory.zig");
 const _table = @import("table.zig");
 const _chunk = @import("chunk.zig");
+const _value = @import("value.zig");
 
 const print = std.debug.print;
 const allocate = _memory.allocate;
@@ -11,6 +12,7 @@ const destroy = _memory.destroy;
 const freeArray = _memory.freeArray;
 const Table = _table.Table;
 const Chunk = _chunk.Chunk;
+const Value = _value.Value;
 
 fn hashString(key: []const u8) u32 {
     var hash: u32 = 2166136261;
@@ -98,6 +100,7 @@ pub const ObjString = struct {
 
 pub const ObjType = enum {
     function,
+    native,
     string,
 };
 
@@ -115,6 +118,10 @@ pub const Obj = struct {
         return @ptrCast(*ObjFunction, self);
     }
 
+    pub fn asNative(self: *Self) *ObjNative {
+        return @ptrCast(*ObjNative, self);
+    }
+
     // freeObject
     pub fn deinit(self: *Self) void {
         switch (self.type) {
@@ -122,6 +129,10 @@ pub const Obj = struct {
                 var function = self.asFunction();
                 function.chunk.deinit();
                 destroy(function);
+            },
+            ObjType.native => {
+                var native = self.asNative();
+                destroy(native);
             },
             ObjType.string => {
                 var string = self.asString();
@@ -135,6 +146,7 @@ pub const Obj = struct {
 pub fn printObject(obj: *Obj) void {
     switch (obj.type) {
         ObjType.function => printFunction(obj.asFunction()),
+        ObjType.native => print("<native fn>", .{}),
         ObjType.string => print("\"{s}\"", .{obj.asString().chars}),
     }
 }
@@ -172,3 +184,22 @@ pub const ObjFunction = struct {
 //     type: ObjType,
 //     value: ObjValue,
 // };
+
+pub const NativeFn = fn (argCount: usize, args: []Value) Value;
+
+pub const ObjNative = struct {
+    const Self = @This();
+
+    obj: Obj,
+    function: NativeFn,
+
+    pub fn init(objects: *Objects, function: NativeFn) *Self {
+        var native = objects.allocateObject(ObjNative, ObjType.native);
+        native.function = function;
+        return native;
+    }
+
+    pub fn asObj(self: *Self) *Obj {
+        return @ptrCast(*Obj, self);
+    }
+};
