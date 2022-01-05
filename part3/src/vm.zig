@@ -24,6 +24,8 @@ const Obj = _object.Obj;
 const ObjString = _object.ObjString;
 const Objects = _object.Objects;
 const ObjFunction = _object.ObjFunction;
+const ObjClosure = _object.ObjClosure;
+const ObjUpvalue = _object.ObjUpvalue;
 const ObjType = _object.ObjType;
 const ObjNative = _object.ObjNative;
 const NativeFn = _object.NativeFn;
@@ -31,7 +33,7 @@ const allocate = _memory.allocate;
 const Table = _table.Table;
 
 pub const CallFrame = struct {
-    function: *ObjFunction,
+    closure: *ObjClosure,
     pc: usize,
     // slots: []Value,
     slots: usize,
@@ -61,6 +63,7 @@ pub fn VM(comptime flags: Flags) type {
         stack: [STACK_MAX]Value,
         stackTop: usize,
         globals: Table,
+        openUpvalues: ?*ObjUpvalue,
         objects: Objects,
 
         pub fn init() Self {
@@ -71,6 +74,7 @@ pub fn VM(comptime flags: Flags) type {
                 .stackTop = 0,
                 .frameCount = 0,
                 .globals = Table.init(),
+                .openUpvalues = null,
                 .objects = Objects.init(),
             };
             self.defineNative("clock", clockNative);
@@ -85,6 +89,7 @@ pub fn VM(comptime flags: Flags) type {
         pub fn resetStack(self: *Self) void {
             self.stackTop = 0;
             self.frameCount = 0;
+            self.openUpvalues = null;
         }
 
         pub fn push(self: *Self, value: Value) void {
@@ -112,7 +117,10 @@ pub fn VM(comptime flags: Flags) type {
                 }
             };
             self.push(.{ .obj = function.asObj() });
-            if (!self.call(function, 0)) {
+            const closure = ObjClosure.init(&self.objects, function);
+            _ = self.pop();
+            self.push(.{ .obj = closure.asObj() });
+            if (!self.call(closure, 0)) {
                 @panic("script call");
             }
 
@@ -138,7 +146,7 @@ pub fn VM(comptime flags: Flags) type {
                         print(" ]", .{});
                     }
                     print("\n", .{});
-                    _ = disassembleInstruction(&self.frame.function.chunk, self.frame.pc);
+                    _ = disassembleInstruction(&self.frame.closure.function.chunk, self.frame.pc);
                 }
 
                 const instruction = self.readByte();
@@ -187,6 +195,14 @@ pub fn VM(comptime flags: Flags) type {
                         const b = self.pop();
                         const a = self.pop();
                         self.push(.{ .boolean = a.equals(b) });
+                    },
+                    @enumToInt(OpCode.GET_UPVALUE) => {
+                        const slot = self.readByte();
+                        self.push(self.frame.closure.upvalues[slot].?.location.*);
+                    },
+                    @enumToInt(OpCode.SET_UPVALUE) => {
+                        const slot = self.readByte();
+                        self.frame.closure.upvalues[slot].?.location.* = self.peek(0);
                     },
                     @enumToInt(OpCode.GREATER) => try self.binaryOp(f64, bool, Value.initBool, greater),
                     @enumToInt(OpCode.LESS) => try self.binaryOp(f64, bool, Value.initBool, less),
@@ -245,8 +261,28 @@ pub fn VM(comptime flags: Flags) type {
                         }
                         self.frame = &self.frames[self.frameCount - 1];
                     },
+                    @enumToInt(OpCode.CLOSURE) => {
+                        const function = self.readConstant().obj.asFunction();
+                        const closure = ObjClosure.init(&self.objects, function);
+                        self.push(.{ .obj = closure.asObj() });
+
+                        for (closure.upvalues) |*upvalue| {
+                            const isLocal = self.readByte();
+                            const index = self.readByte();
+                            if (isLocal != 0) {
+                                upvalue.* = self.captureUpvalue(&self.stack[self.frame.slots + index]);
+                            } else {
+                                upvalue.* = self.frame.closure.upvalues[index];
+                            }
+                        }
+                    },
+                    @enumToInt(OpCode.CLOSE_UPVALUE) => {
+                        self.closeUpvalues(&self.stack[self.stackTop - 1]);
+                        _ = self.pop();
+                    },
                     @enumToInt(OpCode.RETURN) => {
                         const result = self.pop();
+                        self.closeUpvalues(&self.stack[self.frame.slots]);
                         self.frameCount -= 1;
                         if (self.frameCount == 0) {
                             _ = self.pop();
@@ -310,13 +346,13 @@ pub fn VM(comptime flags: Flags) type {
         }
 
         fn readByte(self: *Self) u8 {
-            const b = self.frame.function.chunk.code[self.frame.pc];
+            const b = self.frame.closure.function.chunk.code[self.frame.pc];
             self.frame.pc += 1;
             return b;
         }
 
         fn readConstant(self: *Self) Value {
-            return self.frame.function.chunk.constants.values[self.readByte()];
+            return self.frame.closure.function.chunk.constants.values[self.readByte()];
         }
 
         fn readString(self: *Self) *ObjString {
@@ -325,17 +361,17 @@ pub fn VM(comptime flags: Flags) type {
 
         fn readShort(self: *Self) u16 {
             self.frame.pc += 2;
-            return @intCast(u16, self.frame.function.chunk.code[self.frame.pc - 2]) << 8 |
-                @intCast(u16, self.frame.function.chunk.code[self.frame.pc - 1]);
+            return @intCast(u16, self.frame.closure.function.chunk.code[self.frame.pc - 2]) << 8 |
+                @intCast(u16, self.frame.closure.function.chunk.code[self.frame.pc - 1]);
         }
 
         fn peek(self: *Self, distance: usize) Value {
             return self.stack[self.stackTop - 1 - distance];
         }
 
-        fn call(self: *Self, function: *ObjFunction, argCount: usize) bool {
-            if (argCount != function.arity) {
-                self.runtimeError("Expected {d} arguments but got {d}.", .{ function.arity, argCount });
+        fn call(self: *Self, closure: *ObjClosure, argCount: usize) bool {
+            if (argCount != closure.function.arity) {
+                self.runtimeError("Expected {d} arguments but got {d}.", .{ closure.function.arity, argCount });
                 return false;
             }
             if (self.frameCount == FRAMES_MAX) {
@@ -345,7 +381,7 @@ pub fn VM(comptime flags: Flags) type {
 
             var frame = &self.frames[self.frameCount];
             self.frameCount += 1;
-            frame.function = function;
+            frame.closure = closure;
             frame.pc = 0;
             frame.slots = self.stackTop - argCount - 1; // self.stack[self.stackTop - argCount - 1 ..];
             return true;
@@ -355,7 +391,7 @@ pub fn VM(comptime flags: Flags) type {
             switch (callee) {
                 Value.obj => |obj| {
                     switch (obj.type) {
-                        ObjType.function => return self.call(obj.asFunction(), argCount),
+                        ObjType.closure => return self.call(obj.asClosure(), argCount),
                         ObjType.native => {
                             const native = obj.asNative();
                             const result = native.function(argCount, self.stack[self.stackTop - argCount ..]);
@@ -370,6 +406,47 @@ pub fn VM(comptime flags: Flags) type {
             }
             self.runtimeError("Can only call functions and classes.", .{});
             return false;
+        }
+
+        fn captureUpvalue(self: *Self, local: *Value) *ObjUpvalue {
+            var prevUpvalue: ?*ObjUpvalue = null;
+            var upvalue = self.openUpvalues;
+            while (upvalue) |upv| {
+                if (@ptrToInt(upv.location) <= @ptrToInt(local)) {
+                    break;
+                }
+                prevUpvalue = upv;
+                upvalue = upv.next;
+            }
+
+            if (upvalue) |upv| {
+                if (upv.location == local) {
+                    return upv;
+                }
+            }
+
+            var createdUpvalue = ObjUpvalue.init(&self.objects, local);
+            createdUpvalue.next = upvalue;
+
+            if (prevUpvalue) |prevUpv| {
+                prevUpv.next = createdUpvalue;
+            } else {
+                self.openUpvalues = createdUpvalue;
+            }
+
+            return createdUpvalue;
+        }
+
+        fn closeUpvalues(self: *Self, last: *Value) void {
+            while (self.openUpvalues) |openUpvs| {
+                if (@ptrToInt(openUpvs.location) < @ptrToInt(last)) {
+                    break;
+                }
+                var upvalue = openUpvs;
+                upvalue.closed = upvalue.location.*;
+                upvalue.location = &upvalue.closed;
+                self.openUpvalues = upvalue.next;
+            }
         }
 
         fn isFalsey(value: Value) bool {
@@ -399,8 +476,8 @@ pub fn VM(comptime flags: Flags) type {
             while (i >= 0) : (i -= 1) {
                 const frame = &self.frames[@intCast(usize, i)];
                 const instruction = frame.pc - 1;
-                const line = frame.function.chunk.lines[instruction];
-                if (frame.function.name) |name| {
+                const line = frame.closure.function.chunk.lines[instruction];
+                if (frame.closure.function.name) |name| {
                     std.log.err("[line {d}] in {s}()", .{ line, name.chars });
                 } else {
                     std.log.err("[line {d}] in script", .{line});

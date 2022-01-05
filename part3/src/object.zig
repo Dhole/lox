@@ -98,10 +98,52 @@ pub const ObjString = struct {
     }
 };
 
+pub const ObjUpvalue = struct {
+    const Self = @This();
+
+    obj: Obj,
+    location: *Value,
+    closed: Value,
+    next: ?*ObjUpvalue,
+
+    pub fn init(objects: *Objects, slot: *Value) *Self {
+        var upvalue = objects.allocateObject(ObjUpvalue, ObjType.upvalue);
+        upvalue.closed = .nil;
+        upvalue.location = slot;
+        upvalue.next = null;
+        return upvalue;
+    }
+};
+
+pub const ObjClosure = struct {
+    const Self = @This();
+
+    obj: Obj,
+    function: *ObjFunction,
+    upvalues: []?*ObjUpvalue,
+
+    pub fn init(objects: *Objects, function: *ObjFunction) *Self {
+        var upvalues = allocate(?*ObjUpvalue, function.upvalueCount);
+        for (upvalues) |*upvalue| {
+            upvalue.* = null;
+        }
+        var closure = objects.allocateObject(ObjClosure, ObjType.closure);
+        closure.function = function;
+        closure.upvalues = upvalues;
+        return closure;
+    }
+
+    pub fn asObj(self: *Self) *Obj {
+        return @ptrCast(*Obj, self);
+    }
+};
+
 pub const ObjType = enum {
+    closure,
     function,
     native,
     string,
+    upvalue,
 };
 
 pub const Obj = struct {
@@ -114,6 +156,10 @@ pub const Obj = struct {
         return @ptrCast(*ObjString, self);
     }
 
+    pub fn asUpvalue(self: *Self) *ObjUpvalue {
+        return @ptrCast(*ObjUpvalue, self);
+    }
+
     pub fn asFunction(self: *Self) *ObjFunction {
         return @ptrCast(*ObjFunction, self);
     }
@@ -122,9 +168,18 @@ pub const Obj = struct {
         return @ptrCast(*ObjNative, self);
     }
 
+    pub fn asClosure(self: *Self) *ObjClosure {
+        return @ptrCast(*ObjClosure, self);
+    }
+
     // freeObject
     pub fn deinit(self: *Self) void {
         switch (self.type) {
+            ObjType.closure => {
+                var closure = self.asClosure();
+                freeArray(?*ObjUpvalue, closure.upvalues);
+                destroy(closure);
+            },
             ObjType.function => {
                 var function = self.asFunction();
                 function.chunk.deinit();
@@ -139,15 +194,21 @@ pub const Obj = struct {
                 freeArray(u8, string.chars);
                 destroy(string);
             },
+            ObjType.upvalue => {
+                var upvalue = self.asUpvalue();
+                destroy(upvalue);
+            },
         }
     }
 };
 
 pub fn printObject(obj: *Obj) void {
     switch (obj.type) {
+        ObjType.closure => printFunction(obj.asClosure().function),
         ObjType.function => printFunction(obj.asFunction()),
         ObjType.native => print("<native fn>", .{}),
         ObjType.string => print("\"{s}\"", .{obj.asString().chars}),
+        ObjType.upvalue => print("upvalue", .{}),
     }
 }
 
@@ -164,12 +225,14 @@ pub const ObjFunction = struct {
 
     obj: Obj,
     arity: usize,
+    upvalueCount: usize,
     chunk: Chunk,
     name: ?*ObjString,
 
     pub fn init(objects: *Objects) *Self {
         var function = objects.allocateObject(ObjFunction, ObjType.function);
         function.arity = 0;
+        function.upvalueCount = 0;
         function.name = null;
         function.chunk = Chunk.init();
         return function;

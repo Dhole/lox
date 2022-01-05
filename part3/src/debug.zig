@@ -34,6 +34,28 @@ pub fn disassembleInstruction(chunk: *Chunk, offset: usize) usize {
         @enumToInt(OpCode.JUMP_IF_FALSE) => jumpInstruction("OP_JUMP_IF_FALSE", 1, chunk, offset),
         @enumToInt(OpCode.LOOP) => jumpInstruction("OP_LOOP", -1, chunk, offset),
         @enumToInt(OpCode.CALL) => byteInstruction("OP_CALL", chunk, offset),
+        @enumToInt(OpCode.CLOSURE) => blk: {
+            offset += 1;
+            const constant = chunk.code[offset + 1];
+            offset += 1;
+            print("{s: <16} {d: >4} ", .{ "OP_CLOSURE", constant });
+            printValue(chunk.constants.values[constant]);
+            print("\n", .{});
+
+            const function = chunk.constants.values[constant].obj.asFunction();
+            var j: usize = 0;
+            while (j < function.upvalueCount) : (j += 1) {
+                const isLocal = chunk.code[offset];
+                offset += 1;
+                const index = chunk.code[offset];
+                offset += 1;
+                print("{d: >4}      |                     {s} {d}", //
+                    .{ offset - 2, if (isLocal) "local" else "upvalue", index });
+            }
+
+            break :blk offset;
+        },
+        @enumToInt(OpCode.CLOSE_UPVALUE) => simpleInstruction("OP_CLOSE_UPVALUE", offset),
         @enumToInt(OpCode.RETURN) => simpleInstruction("OP_RETURN", offset),
         @enumToInt(OpCode.CONSTANT) => constantInstruction("OP_CONSTANT", chunk, offset),
         @enumToInt(OpCode.NIL) => simpleInstruction("OP_NIL", offset),
@@ -45,6 +67,8 @@ pub fn disassembleInstruction(chunk: *Chunk, offset: usize) usize {
         @enumToInt(OpCode.GET_GLOBAL) => constantInstruction("OP_GET_GLOBAL", chunk, offset),
         @enumToInt(OpCode.DEFINE_GLOBAL) => constantInstruction("OP_DEFINE_GLOBAL", chunk, offset),
         @enumToInt(OpCode.SET_GLOBAL) => constantInstruction("OP_SET_GLOBAL", chunk, offset),
+        @enumToInt(OpCode.GET_UPVALUE) => byteInstruction("OP_GET_UPVALUE", chunk, offset),
+        @enumToInt(OpCode.SET_UPVALUE) => byteInstruction("OP_SET_UPVALUE", chunk, offset),
         @enumToInt(OpCode.EQUAL) => simpleInstruction("OP_EQUAL", offset),
         @enumToInt(OpCode.GREATER) => simpleInstruction("OP_GREATER", offset),
         @enumToInt(OpCode.LESS) => simpleInstruction("OP_LESS", offset),

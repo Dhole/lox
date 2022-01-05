@@ -13,6 +13,8 @@ pub const OpCode = enum {
     GET_GLOBAL,
     DEFINE_GLOBAL,
     SET_GLOBAL,
+    GET_UPVALUE,
+    SET_UPVALUE,
     EQUAL,
     GREATER,
     LESS,
@@ -27,6 +29,8 @@ pub const OpCode = enum {
     JUMP_IF_FALSE,
     LOOP,
     CALL,
+    CLOSURE,
+    CLOSE_UPVALUE,
     RETURN,
 };
 

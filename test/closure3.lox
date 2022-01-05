@@ -1,0 +1,18 @@
+fun outer() {
+  var x = "outside";
+  fun inner() {
+    print x;
+  }
+
+  return inner;
+}
+
+var closure = outer();
+var a = "one";
+var b = "two";
+var c = "three";
+{
+  var x = "x";
+  var y = "y";
+  closure();
+}

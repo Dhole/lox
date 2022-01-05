@@ -40,6 +40,12 @@ PRIMARY };
 pub const Local = struct {
     name: Token,
     depth: isize,
+    isCaptured: bool,
+};
+
+pub const Upvalue = struct {
+    index: u8,
+    isLocal: bool,
 };
 
 pub const FunctionType = enum {
@@ -55,6 +61,7 @@ pub const Compiler = struct {
     type: FunctionType,
     locals: [U8_COUNT]Local,
     localCount: usize,
+    upvalues: [U8_COUNT]Upvalue,
     scopeDepth: usize,
 
     pub fn init(objects: *Objects, typ: FunctionType, enclosing: ?*Compiler) Self {
@@ -64,11 +71,13 @@ pub const Compiler = struct {
             .type = typ,
             .locals = undefined,
             .localCount = 0,
+            .upvalues = undefined,
             .scopeDepth = 0,
         };
         var local = &self.locals[self.localCount];
         self.localCount += 1;
         local.depth = 0;
+        local.isCaptured = false;
         local.name.value = "";
 
         return self;
@@ -141,8 +150,9 @@ pub fn Parser(comptime flags: Flags) type {
         }
 
         fn function(self: *Self, typ: FunctionType) void {
-            self.compiler = &Compiler.init(self.objects, typ, self.compiler);
-            self.compiler.function.name = self.objects.copyString(self.previous.value);
+            var compiler = &Compiler.init(self.objects, typ, self.compiler);
+            compiler.function.name = self.objects.copyString(self.previous.value);
+            self.compiler = compiler;
             self.beginScope();
 
             self.consume(TT.LEFT_PAREN, "Expect '(' after function name.");
@@ -166,7 +176,13 @@ pub fn Parser(comptime flags: Flags) type {
             self.block();
 
             const fun = self.endCompiler();
-            self.emitBytes(@enumToInt(OpCode.CONSTANT), self.makeConstant(.{ .obj = fun.asObj() }));
+            self.emitBytes(@enumToInt(OpCode.CLOSURE), self.makeConstant(.{ .obj = fun.asObj() }));
+
+            var i: usize = 0;
+            while (i < fun.upvalueCount) : (i += 1) {
+                self.emitByte(if (compiler.upvalues[i].isLocal) 1 else 0);
+                self.emitByte(compiler.upvalues[i].index);
+            }
         }
 
         fn funDeclaration(self: *Self) void {
@@ -462,7 +478,11 @@ pub fn Parser(comptime flags: Flags) type {
             while (self.compiler.localCount > 0 and
                 self.compiler.locals[self.compiler.localCount - 1].depth > self.compiler.scopeDepth)
             {
-                self.emitByte(@enumToInt(OpCode.POP));
+                if (self.compiler.locals[self.compiler.localCount - 1].isCaptured) {
+                    self.emitByte(@enumToInt(OpCode.CLOSE_UPVALUE));
+                } else {
+                    self.emitByte(@enumToInt(OpCode.POP));
+                }
                 self.compiler.localCount -= 1;
             }
         }
@@ -544,9 +564,15 @@ pub fn Parser(comptime flags: Flags) type {
                 getOp = @enumToInt(OpCode.GET_LOCAL);
                 setOp = @enumToInt(OpCode.SET_LOCAL);
             } else {
-                arg = self.identifierConstant(&name);
-                getOp = @enumToInt(OpCode.GET_GLOBAL);
-                setOp = @enumToInt(OpCode.SET_GLOBAL);
+                arg = self.resolveUpvalue(self.compiler, &name);
+                if (arg != -1) {
+                    getOp = @enumToInt(OpCode.GET_UPVALUE);
+                    setOp = @enumToInt(OpCode.SET_UPVALUE);
+                } else {
+                    arg = self.identifierConstant(&name);
+                    getOp = @enumToInt(OpCode.GET_GLOBAL);
+                    setOp = @enumToInt(OpCode.SET_GLOBAL);
+                }
             }
 
             if (canAssign and self.match(TT.EQUAL)) {
@@ -626,6 +652,45 @@ pub fn Parser(comptime flags: Flags) type {
             return -1;
         }
 
+        fn addUpvalue(self: *Self, compiler: *Compiler, index: u8, isLocal: bool) usize {
+            _ = self;
+            const upvalueCount = compiler.function.upvalueCount;
+
+            var i: usize = 0;
+            while (i < upvalueCount) : (i += 1) {
+                const upvalue = compiler.upvalues[i];
+                if (upvalue.index == index and upvalue.isLocal == isLocal) {
+                    return i;
+                }
+            }
+
+            if (upvalueCount == U8_COUNT) {
+                self.err("Too many closure variables in function.");
+            }
+
+            compiler.upvalues[upvalueCount].isLocal = isLocal;
+            compiler.upvalues[upvalueCount].index = index;
+            compiler.function.upvalueCount += 1;
+            return upvalueCount;
+        }
+
+        fn resolveUpvalue(self: *Self, compiler: *Compiler, name: *const Token) isize {
+            if (compiler.enclosing) |enclosing| {
+                const local = self.resolveLocal(enclosing, name);
+                if (local != -1) {
+                    enclosing.locals[@intCast(usize, local)].isCaptured = true;
+                    return @intCast(isize, self.addUpvalue(compiler, @intCast(u8, local), true));
+                }
+                const upvalue = self.resolveUpvalue(enclosing, name);
+                if (upvalue != 1) {
+                    return @intCast(isize, self.addUpvalue(compiler, @intCast(u8, upvalue), false));
+                }
+                return -1;
+            } else {
+                return -1;
+            }
+        }
+
         fn addLocal(self: *Self, name: Token) void {
             if (self.compiler.localCount == U8_COUNT) {
                 self.err("Too many local variables in function.");
@@ -636,6 +701,7 @@ pub fn Parser(comptime flags: Flags) type {
             self.compiler.localCount += 1;
             local.name = name;
             local.depth = -1;
+            local.isCaptured = false;
         }
 
         fn declareVariable(self: *Self) void {
