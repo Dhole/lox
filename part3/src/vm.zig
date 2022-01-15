@@ -8,6 +8,7 @@ const _compiler = @import("compiler.zig");
 const _object = @import("object.zig");
 const _memory = @import("memory.zig");
 const _table = @import("table.zig");
+const _global = @import("global.zig");
 
 const print = std.debug.print;
 
@@ -30,7 +31,9 @@ const ObjType = _object.ObjType;
 const ObjNative = _object.ObjNative;
 const NativeFn = _object.NativeFn;
 const allocate = _memory.allocate;
+const allocator = _memory.allocator;
 const Table = _table.Table;
+const debugLogGC = _memory.debugLogGC;
 
 pub const CallFrame = struct {
     closure: *ObjClosure,
@@ -52,6 +55,7 @@ pub const InterpretError = error{
 
 pub const FRAMES_MAX: usize = 64;
 pub const STACK_MAX: usize = FRAMES_MAX * U8_COUNT;
+pub const GC_HEAP_GROW_FACTOR: usize = 2;
 
 pub fn VM(comptime flags: Flags) type {
     return struct {
@@ -64,7 +68,14 @@ pub fn VM(comptime flags: Flags) type {
         stackTop: usize,
         globals: Table,
         openUpvalues: ?*ObjUpvalue,
+        parser: ?*Parser(flags),
+
+        bytesAllocated: usize,
+        nextGC: usize,
         objects: Objects,
+        grayCount: usize,
+        // grayCapacity: usize, // grayCapacity is grayStack.len
+        grayStack: []*Obj,
 
         pub fn init() Self {
             var self = Self{
@@ -75,8 +86,14 @@ pub fn VM(comptime flags: Flags) type {
                 .frameCount = 0,
                 .globals = Table.init(),
                 .openUpvalues = null,
+                .parser = null,
+                .bytesAllocated = 0,
+                .nextGC = 1024 * 1024,
                 .objects = Objects.init(),
+                .grayCount = 0,
+                .grayStack = &[_]*Obj{},
             };
+            _global.setVM(&self);
             self.defineNative("clock", clockNative);
             return self;
         }
@@ -84,6 +101,9 @@ pub fn VM(comptime flags: Flags) type {
         pub fn deinit(self: *Self) void {
             self.globals.deinit();
             self.objects.deinit();
+            if (self.grayStack.len != 0) {
+                allocator.free(self.grayStack);
+            }
         }
 
         pub fn resetStack(self: *Self) void {
@@ -108,6 +128,7 @@ pub fn VM(comptime flags: Flags) type {
 
         pub fn interpret(self: *Self, source: []const u8) InterpretResult {
             var parser = Parser(flags).init();
+            self.parser = &parser;
 
             const function = blk: {
                 if (parser.compile(&self.objects, source)) |fun| {
@@ -458,14 +479,16 @@ pub fn VM(comptime flags: Flags) type {
         }
 
         fn concatenate(self: *Self) void {
-            const b = self.pop().obj.asString();
-            const a = self.pop().obj.asString();
+            const b = self.peek(0).obj.asString();
+            const a = self.peek(1).obj.asString();
 
             const length = a.chars.len + b.chars.len;
             var chars = allocate(u8, length);
             std.mem.copy(u8, chars[0..a.chars.len], a.chars);
             std.mem.copy(u8, chars[a.chars.len..], b.chars);
             const res = self.objects.takeString(chars);
+            _ = self.pop();
+            _ = self.pop();
             self.push(.{ .obj = res.asObj() });
         }
 
@@ -493,6 +516,81 @@ pub fn VM(comptime flags: Flags) type {
             _ = self.globals.set(self.stack[0].obj.asString(), self.stack[1]);
             _ = self.pop();
             _ = self.pop();
+        }
+
+        pub fn collectGarbage(self: *Self) void {
+            var before: usize = undefined;
+            if (debugLogGC) {
+                print("-- gc begin\n", .{});
+                before = self.bytesAllocated;
+                // if (_object.toggle) {
+                //     @panic("begin");
+                // }
+            }
+            self.markRoots();
+            self.traceReferences();
+            self.objects.strings.removeWhite();
+            self.sweep();
+            self.nextGC = self.bytesAllocated * GC_HEAP_GROW_FACTOR;
+            if (debugLogGC) {
+                print("-- gc end\n", .{});
+                print("   collected {d} bytes (from {d} to {d}) next at {d}\n", //
+                    .{ before - self.bytesAllocated, before, self.bytesAllocated, self.nextGC });
+            }
+        }
+
+        fn markRoots(self: *Self) void {
+            var i: usize = 0;
+            while (i < self.stackTop) : (i += 1) {
+                var slot = &self.stack[i];
+                slot.mark();
+            }
+            i = 0;
+            while (i < self.frameCount) : (i += 1) {
+                self.frames[i].closure.asObj().mark();
+            }
+            var upvalue = self.openUpvalues;
+            while (upvalue) |upv| {
+                upv.asObj().mark();
+                upvalue = upv.next;
+            }
+            // markTable(&vm.globals);
+            self.globals.mark();
+            if (self.parser) |parser| {
+                parser.markCompilerRoots();
+            }
+        }
+
+        fn traceReferences(self: *Self) void {
+            while (self.grayCount > 0) {
+                self.grayCount -= 1;
+                var object = self.grayStack[self.grayCount];
+                object.blacken();
+            }
+        }
+
+        fn sweep(self: *Self) void {
+            var previous: ?*Obj = null;
+            var object: ?*Obj = self.objects.objects;
+            var count: usize = 0;
+
+            while (object) |obj| {
+                count += 1;
+                if (obj.isMarked) {
+                    obj.isMarked = false;
+                    previous = object;
+                    object = obj.next;
+                } else {
+                    var unreached = obj;
+                    object = obj.next;
+                    if (previous) |prev| {
+                        prev.next = object;
+                    } else {
+                        self.objects.objects = object;
+                    }
+                    unreached.deinit();
+                }
+            }
         }
     };
 }

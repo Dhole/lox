@@ -76,6 +76,13 @@ pub const Value = union(ValueType) {
             Value.obj => |a| a == b.obj,
         };
     }
+
+    pub fn mark(self: Self) void {
+        switch (self) {
+            Self.obj => |obj| obj.mark(),
+            else => {},
+        }
+    }
 };
 
 fn booleanStr(boolean: bool) []const u8 {
@@ -125,6 +132,13 @@ pub const ValueArray = struct {
         }
         self.values[self.count] = value;
         self.count += 1;
+    }
+
+    pub fn mark(self: *Self) void {
+        var i: usize = 0;
+        while (i < self.count) : (i += 1) {
+            self.values[i].mark();
+        }
     }
 };
 

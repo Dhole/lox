@@ -1,18 +1,26 @@
 const std = @import("std");
 
 const _memory = @import("memory.zig");
+const _common = @import("common.zig");
 const _table = @import("table.zig");
 const _chunk = @import("chunk.zig");
 const _value = @import("value.zig");
+const g = @import("global.zig");
 
 const print = std.debug.print;
 const allocate = _memory.allocate;
+const sysReallocate = _memory.sysReallocate;
 const create = _memory.create;
 const destroy = _memory.destroy;
 const freeArray = _memory.freeArray;
 const Table = _table.Table;
 const Chunk = _chunk.Chunk;
 const Value = _value.Value;
+const printValue = _value.printValue;
+const debugStressGC = _memory.debugLogGC;
+const debugLogGC = _memory.debugLogGC;
+const growCapacity = _memory.growCapacity;
+const flags = _common.flags;
 
 fn hashString(key: []const u8) u32 {
     var hash: u32 = 2166136261;
@@ -40,8 +48,13 @@ pub const Objects = struct {
     pub fn allocateObject(self: *Self, comptime T: type, objectType: ObjType) *T {
         var object = @ptrCast(*Obj, create(T));
         object.type = objectType;
+        object.isMarked = false;
         object.next = self.objects;
         self.objects = object;
+
+        if (debugLogGC) {
+            print("{*} allocate {d} for {}\n", .{ object, @sizeOf(T), objectType });
+        }
         return @ptrCast(*T, object);
     }
 
@@ -49,7 +62,9 @@ pub const Objects = struct {
         var string = self.allocateObject(ObjString, ObjType.string);
         string.chars = chars;
         string.hash = hash;
+        g.vm.push(.{ .obj = string.asObj() });
         _ = self.strings.set(string, .nil);
+        _ = g.vm.pop();
         return string;
     }
 
@@ -113,6 +128,10 @@ pub const ObjUpvalue = struct {
         upvalue.next = null;
         return upvalue;
     }
+
+    pub fn asObj(self: *Self) *Obj {
+        return @ptrCast(*Obj, self);
+    }
 };
 
 pub const ObjClosure = struct {
@@ -150,6 +169,7 @@ pub const Obj = struct {
     const Self = @This();
 
     type: ObjType,
+    isMarked: bool,
     next: ?*Obj,
 
     pub fn asString(self: *Self) *ObjString {
@@ -172,8 +192,63 @@ pub const Obj = struct {
         return @ptrCast(*ObjClosure, self);
     }
 
+    pub fn mark(self: *Self) void {
+        if (self.isMarked) {
+            return;
+        }
+        if (debugLogGC) {
+            print("{*} mark ", .{self});
+            printValue(.{ .obj = self });
+            print("\n", .{});
+        }
+        self.isMarked = true;
+
+        if (g.vm.grayStack.len < g.vm.grayCount + 1) {
+            g.vm.grayStack = sysReallocate(*Obj, g.vm.grayStack, growCapacity(g.vm.grayStack.len));
+        }
+        g.vm.grayStack[g.vm.grayCount] = self;
+        g.vm.grayCount += 1;
+    }
+
+    pub fn blacken(self: *Self) void {
+        if (debugLogGC) {
+            print("{*} blacken ", .{self});
+            printValue(.{ .obj = self });
+            print("\n", .{});
+        }
+        switch (self.type) {
+            ObjType.native => {},
+            ObjType.string => {},
+            ObjType.upvalue => {
+                self.asUpvalue().closed.mark();
+            },
+            ObjType.function => {
+                var function = self.asFunction();
+                if (function.name) |name| {
+                    name.asObj().mark();
+                }
+                function.chunk.constants.mark();
+            },
+            ObjType.closure => {
+                var closure = self.asClosure();
+                closure.function.asObj().mark();
+                var i: usize = 0;
+                while (i < closure.function.upvalueCount) : (i += 1) {
+                    if (closure.upvalues[i]) |upvalue| {
+                        upvalue.asObj().mark();
+                    }
+                }
+            },
+        }
+    }
+
     // freeObject
     pub fn deinit(self: *Self) void {
+        if (debugLogGC) {
+            print("{*} free type {} ", .{ self, self.type });
+            printValue(.{ .obj = self });
+            print("\n", .{});
+        }
         switch (self.type) {
             ObjType.closure => {
                 var closure = self.asClosure();

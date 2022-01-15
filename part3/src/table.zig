@@ -6,6 +6,7 @@ const _memory = @import("memory.zig");
 
 const Value = _value.Value;
 const ObjString = _object.ObjString;
+const Obj = _object.Obj;
 const allocate = _memory.allocate;
 const freeArray = _memory.freeArray;
 const growCapacity = _memory.growCapacity;
@@ -22,6 +23,7 @@ pub const Table = struct {
 
     count: usize,
     entries: []Entry,
+    // capacity: self.entries.len,
 
     fn _init(self: *Self) void {
         self.count = 0;
@@ -96,6 +98,30 @@ pub const Table = struct {
                 }
             }
             index = (index + 1) % capacity;
+        }
+    }
+
+    pub fn removeWhite(self: *Self) void {
+        var i: usize = 0;
+        while (i < self.entries.len) : (i += 1) {
+            var entry = self.entries[i];
+            if (entry.key) |key| {
+                if (!key.obj.isMarked) {
+                    _ = self.delete(key);
+                }
+            }
+        }
+    }
+
+    pub fn mark(self: *Self) void {
+        // std.log.debug("DBG table.mark(). len = {d}", .{self.entries.len});
+        var i: usize = 0;
+        while (i < self.entries.len) : (i += 1) {
+            var entry = &self.entries[i];
+            if (entry.key) |key| {
+                key.obj.mark();
+            }
+            entry.value.mark();
         }
     }
 

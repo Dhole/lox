@@ -1,5 +1,8 @@
+const std = @import("std");
+
 const _memory = @import("memory.zig");
 const _value = @import("value.zig");
+const g = @import("global.zig");
 
 const growCapacity = _memory.growCapacity;
 const growArray = _memory.growArray;
@@ -39,7 +42,7 @@ pub const Chunk = struct {
     pub fn deinit(self: *Self) void {
         freeArray(u8, self.code);
         freeArray(usize, self.lines);
-        self._init();
+        self.count = 0;
         self.constants.deinit();
     }
 
@@ -55,7 +58,9 @@ pub const Chunk = struct {
     }
 
     pub fn addConstant(self: *Self, val: Value) usize {
+        g.vm.push(val);
         self.constants.write(val);
+        _ = g.vm.pop();
         return self.constants.count - 1;
     }
 };

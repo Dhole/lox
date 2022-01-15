@@ -102,6 +102,7 @@ pub fn Parser(comptime flags: Flags) type {
         scanner: *Scanner,
         // current in the book
         compiler: *Compiler,
+        compilerSet: bool,
         objects: *Objects,
         hadError: bool,
         panicMode: bool,
@@ -112,6 +113,7 @@ pub fn Parser(comptime flags: Flags) type {
                 .previous = undefined,
                 .scanner = undefined,
                 .compiler = undefined,
+                .compilerSet = false,
                 .objects = undefined,
                 .hadError = false,
                 .panicMode = false,
@@ -122,8 +124,9 @@ pub fn Parser(comptime flags: Flags) type {
             self.objects = objects;
             self.hadError = false;
             self.panicMode = false;
-            self.scanner = &Scanner.init(source);
             self.compiler = &Compiler.init(self.objects, FunctionType.SCRIPT, null);
+            self.compilerSet = true;
+            self.scanner = &Scanner.init(source);
 
             self.advance();
             while (!self.match(TT.EOF)) {
@@ -135,6 +138,17 @@ pub fn Parser(comptime flags: Flags) type {
                 return null;
             } else {
                 return fun;
+            }
+        }
+
+        pub fn markCompilerRoots(self: *Self) void {
+            if (!self.compilerSet) {
+                return;
+            }
+            var compiler: ?*Compiler = self.compiler;
+            while (compiler) |cmp| {
+                cmp.function.asObj().mark();
+                compiler = cmp.enclosing;
             }
         }
 
