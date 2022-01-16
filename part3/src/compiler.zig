@@ -199,6 +199,18 @@ pub fn Parser(comptime flags: Flags) type {
             }
         }
 
+        fn classDeclaration(self: *Self) void {
+            self.consume(TT.IDENTIFIER, "Expect class name.");
+            const nameConstant = self.identifierConstant(&self.previous);
+            self.declareVariable();
+
+            self.emitBytes(@enumToInt(OpCode.CLASS), nameConstant);
+            self.defineVariable(nameConstant);
+
+            self.consume(TT.LEFT_BRACE, "Expect '{' before class body.");
+            self.consume(TT.RIGHT_BRACE, "Expect '}' after class body.");
+        }
+
         fn funDeclaration(self: *Self) void {
             const global = self.parseVariable("Expect function name.");
             self.markInitialized();
@@ -337,7 +349,9 @@ pub fn Parser(comptime flags: Flags) type {
         }
 
         fn declaration(self: *Self) void {
-            if (self.match(TT.FUN)) {
+            if (self.match(TT.CLASS)) {
+                self.classDeclaration();
+            } else if (self.match(TT.FUN)) {
                 self.funDeclaration();
             } else if (self.match(TT.VAR)) {
                 self.varDeclaration();
@@ -526,6 +540,18 @@ pub fn Parser(comptime flags: Flags) type {
             _ = canAssign;
             const argCount = self.argumentList();
             self.emitBytes(@enumToInt(OpCode.CALL), argCount);
+        }
+
+        fn dot(self: *Self, canAssign: bool) void {
+            self.consume(TT.IDENTIFIER, "Expect property name after '.'.");
+            const name = self.identifierConstant(&self.previous);
+
+            if (canAssign and self.match(TT.EQUAL)) {
+                self.expression();
+                self.emitBytes(@enumToInt(OpCode.SET_PROPERTY), name);
+            } else {
+                self.emitBytes(@enumToInt(OpCode.GET_PROPERTY), name);
+            }
         }
 
         fn literal(self: *Self, canAssign: bool) void {
@@ -827,7 +853,7 @@ pub fn Parser(comptime flags: Flags) type {
             _rules[@enumToInt(TT.LEFT_BRACE)] = .{ .prefix = null, .infix = null, .precedence = Precedence.NONE };
             _rules[@enumToInt(TT.RIGHT_BRACE)] = .{ .prefix = null, .infix = null, .precedence = Precedence.NONE };
             _rules[@enumToInt(TT.COMMA)] = .{ .prefix = null, .infix = null, .precedence = Precedence.NONE };
-            _rules[@enumToInt(TT.DOT)] = .{ .prefix = null, .infix = null, .precedence = Precedence.NONE };
+            _rules[@enumToInt(TT.DOT)] = .{ .prefix = null, .infix = &dot, .precedence = Precedence.CALL };
             _rules[@enumToInt(TT.MINUS)] = .{ .prefix = &unary, .infix = &binary, .precedence = Precedence.TERM };
             _rules[@enumToInt(TT.PLUS)] = .{ .prefix = null, .infix = &binary, .precedence = Precedence.TERM };
             _rules[@enumToInt(TT.SEMICOLON)] = .{ .prefix = null, .infix = null, .precedence = Precedence.NONE };

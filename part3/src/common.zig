@@ -15,6 +15,8 @@ pub const OpCode = enum {
     SET_GLOBAL,
     GET_UPVALUE,
     SET_UPVALUE,
+    GET_PROPERTY,
+    SET_PROPERTY,
     EQUAL,
     GREATER,
     LESS,
@@ -32,6 +34,7 @@ pub const OpCode = enum {
     CLOSURE,
     CLOSE_UPVALUE,
     RETURN,
+    CLASS,
 };
 
 pub const Flags = struct {

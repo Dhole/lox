@@ -158,8 +158,10 @@ pub const ObjClosure = struct {
 };
 
 pub const ObjType = enum {
+    class,
     closure,
     function,
+    instance,
     native,
     string,
     upvalue,
@@ -171,6 +173,14 @@ pub const Obj = struct {
     type: ObjType,
     isMarked: bool,
     next: ?*Obj,
+
+    pub fn asInstance(self: *Self) *ObjInstance {
+        return @ptrCast(*ObjInstance, self);
+    }
+
+    pub fn asClass(self: *Self) *ObjClass {
+        return @ptrCast(*ObjClass, self);
+    }
 
     pub fn asString(self: *Self) *ObjString {
         return @ptrCast(*ObjString, self);
@@ -217,25 +227,33 @@ pub const Obj = struct {
             print("\n", .{});
         }
         switch (self.type) {
+            ObjType.class => {
+                self.asClass().name.obj.mark();
+            },
             ObjType.native => {},
             ObjType.string => {},
+            ObjType.instance => {
+                var instance = self.asInstance();
+                instance.klass.obj.mark();
+                instance.fields.mark();
+            },
             ObjType.upvalue => {
                 self.asUpvalue().closed.mark();
             },
             ObjType.function => {
                 var function = self.asFunction();
                 if (function.name) |name| {
-                    name.asObj().mark();
+                    name.obj.mark();
                 }
                 function.chunk.constants.mark();
             },
             ObjType.closure => {
                 var closure = self.asClosure();
-                closure.function.asObj().mark();
+                closure.function.obj.mark();
                 var i: usize = 0;
                 while (i < closure.function.upvalueCount) : (i += 1) {
                     if (closure.upvalues[i]) |upvalue| {
-                        upvalue.asObj().mark();
+                        upvalue.obj.mark();
                     }
                 }
             },
@@ -250,6 +268,10 @@ pub const Obj = struct {
             print("\n", .{});
         }
         switch (self.type) {
+            ObjType.class => {
+                var klass = self.asClass();
+                destroy(klass);
+            },
             ObjType.closure => {
                 var closure = self.asClosure();
                 freeArray(?*ObjUpvalue, closure.upvalues);
@@ -259,6 +281,11 @@ pub const Obj = struct {
                 var function = self.asFunction();
                 function.chunk.deinit();
                 destroy(function);
+            },
+            ObjType.instance => {
+                var instance = self.asInstance();
+                instance.fields.deinit();
+                destroy(instance);
             },
             ObjType.native => {
                 var native = self.asNative();
@@ -279,6 +306,8 @@ pub const Obj = struct {
 
 pub fn printObject(obj: *Obj) void {
     switch (obj.type) {
+        ObjType.class => print("<class {s}>", .{obj.asClass().name.chars}),
+        ObjType.instance => print("<{s} instance>", .{obj.asInstance().klass.name.chars}),
         ObjType.closure => printFunction(obj.asClosure().function),
         ObjType.function => printFunction(obj.asFunction()),
         ObjType.native => print("<native fn>", .{}),
@@ -335,6 +364,42 @@ pub const ObjNative = struct {
         var native = objects.allocateObject(ObjNative, ObjType.native);
         native.function = function;
         return native;
+    }
+
+    pub fn asObj(self: *Self) *Obj {
+        return @ptrCast(*Obj, self);
+    }
+};
+
+pub const ObjClass = struct {
+    const Self = @This();
+
+    obj: Obj,
+    name: *ObjString,
+
+    pub fn init(objects: *Objects, name: *ObjString) *Self {
+        var klass = objects.allocateObject(ObjClass, ObjType.class);
+        klass.name = name;
+        return klass;
+    }
+
+    pub fn asObj(self: *Self) *Obj {
+        return @ptrCast(*Obj, self);
+    }
+};
+
+pub const ObjInstance = struct {
+    const Self = @This();
+
+    obj: Obj,
+    klass: *ObjClass,
+    fields: Table,
+
+    pub fn init(objects: *Objects, klass: *ObjClass) *Self {
+        var instance = objects.allocateObject(ObjInstance, ObjType.instance);
+        instance.klass = klass;
+        instance.fields = Table.init();
+        return instance;
     }
 
     pub fn asObj(self: *Self) *Obj {

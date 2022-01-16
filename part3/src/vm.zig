@@ -29,6 +29,8 @@ const ObjClosure = _object.ObjClosure;
 const ObjUpvalue = _object.ObjUpvalue;
 const ObjType = _object.ObjType;
 const ObjNative = _object.ObjNative;
+const ObjClass = _object.ObjClass;
+const ObjInstance = _object.ObjInstance;
 const NativeFn = _object.NativeFn;
 const allocate = _memory.allocate;
 const allocator = _memory.allocator;
@@ -212,6 +214,36 @@ pub fn VM(comptime flags: Flags) type {
                             return InterpretError.Runtime;
                         }
                     },
+                    @enumToInt(OpCode.GET_PROPERTY) => {
+                        if (!self.peek(0).isInstance()) {
+                            self.runtimeError("Only instances have properties.", .{});
+                            return InterpretError.Runtime;
+                        }
+
+                        const instance = self.peek(0).obj.asInstance();
+                        const name = self.readString();
+
+                        var value: Value = undefined;
+                        if (instance.fields.get(name, &value)) {
+                            _ = self.pop(); // Instance.
+                            self.push(value);
+                        } else {
+                            self.runtimeError("Undefined property '{s}'.", .{name.chars});
+                            return InterpretError.Runtime;
+                        }
+                    },
+                    @enumToInt(OpCode.SET_PROPERTY) => {
+                        if (!self.peek(1).isInstance()) {
+                            self.runtimeError("Only instances have properties.", .{});
+                            return InterpretError.Runtime;
+                        }
+
+                        const instance = self.peek(1).obj.asInstance();
+                        _ = instance.fields.set(self.readString(), self.peek(0));
+                        const value = self.pop();
+                        _ = self.pop();
+                        self.push(value);
+                    },
                     @enumToInt(OpCode.EQUAL) => {
                         const b = self.pop();
                         const a = self.pop();
@@ -313,6 +345,9 @@ pub fn VM(comptime flags: Flags) type {
                         self.push(result);
                         self.frame = &self.frames[self.frameCount - 1];
                     },
+                    @enumToInt(OpCode.CLASS) => {
+                        self.push(.{ .obj = ObjClass.init(&self.objects, self.readString()).asObj() });
+                    },
                     else => {
                         return InterpretError.Runtime;
                     },
@@ -412,6 +447,12 @@ pub fn VM(comptime flags: Flags) type {
             switch (callee) {
                 Value.obj => |obj| {
                     switch (obj.type) {
+                        ObjType.class => {
+                            const klass = obj.asClass();
+                            self.stack[self.stackTop - argCount - 1] =
+                                .{ .obj = ObjInstance.init(&self.objects, klass).asObj() };
+                            return true;
+                        },
                         ObjType.closure => return self.call(obj.asClosure(), argCount),
                         ObjType.native => {
                             const native = obj.asNative();

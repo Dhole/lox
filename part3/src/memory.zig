@@ -7,7 +7,7 @@ pub const allocator = std.heap.page_allocator;
 const flags = _common.flags;
 
 pub const debugStressGC = true;
-pub const debugLogGC = true;
+pub const debugLogGC = false;
 
 pub fn growCapacity(capacity: usize) usize {
     return if (capacity < 8) 8 else capacity * 2;
@@ -31,7 +31,9 @@ pub fn reallocate(comptime T: type, slice: []T, newSize: usize) []T {
         (@intCast(isize, newSize) - @intCast(isize, slice.len)) * @intCast(isize, @sizeOf(T)) //
     );
     if (newSize == 0) {
-        allocator.free(slice);
+        if (slice.len != 0) {
+            allocator.free(slice);
+        }
         return &[_]T{};
     }
     if (newSize > slice.len) {
