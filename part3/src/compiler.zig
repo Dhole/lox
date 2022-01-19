@@ -592,6 +592,10 @@ pub fn Parser(comptime flags: Flags) type {
             if (canAssign and self.match(TT.EQUAL)) {
                 self.expression();
                 self.emitBytes(@enumToInt(OpCode.SET_PROPERTY), name);
+            } else if (self.match(TT.LEFT_PAREN)) {
+                const argCount = self.argumentList();
+                self.emitBytes(@enumToInt(OpCode.INVOKE), name);
+                self.emitByte(argCount);
             } else {
                 self.emitBytes(@enumToInt(OpCode.GET_PROPERTY), name);
             }

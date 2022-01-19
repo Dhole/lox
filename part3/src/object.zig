@@ -370,7 +370,7 @@ pub const ObjFunction = struct {
 //     value: ObjValue,
 // };
 
-pub const NativeFn = fn (argCount: usize, args: []Value) Value;
+pub const NativeFn = fn (argCount: u8, args: []Value) Value;
 
 pub const ObjNative = struct {
     const Self = @This();

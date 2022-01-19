@@ -318,6 +318,14 @@ pub fn VM(comptime flags: Flags) type {
                         }
                         self.frame = &self.frames[self.frameCount - 1];
                     },
+                    @enumToInt(OpCode.INVOKE) => {
+                        const method = self.readString();
+                        const argCount = self.readByte();
+                        if (!self.invoke(method, argCount)) {
+                            return InterpretError.Runtime;
+                        }
+                        self.frame = &self.frames[self.frameCount - 1];
+                    },
                     @enumToInt(OpCode.CLOSURE) => {
                         const function = self.readConstant().obj.asFunction();
                         const closure = ObjClosure.init(&self.objects, function);
@@ -432,7 +440,7 @@ pub fn VM(comptime flags: Flags) type {
             return self.stack[self.stackTop - 1 - distance];
         }
 
-        fn call(self: *Self, closure: *ObjClosure, argCount: usize) bool {
+        fn call(self: *Self, closure: *ObjClosure, argCount: u8) bool {
             if (argCount != closure.function.arity) {
                 self.runtimeError("Expected {d} arguments but got {d}.", .{ closure.function.arity, argCount });
                 return false;
@@ -487,6 +495,34 @@ pub fn VM(comptime flags: Flags) type {
             }
             self.runtimeError("Can only call functions and classes.", .{});
             return false;
+        }
+
+        fn invokeFromClass(self: *Self, klass: *ObjClass, name: *ObjString, argCount: u8) bool {
+            var method: Value = undefined;
+            if (!klass.methods.get(name, &method)) {
+                self.runtimeError("Undefined property '{s}'.", .{name.chars});
+                return false;
+            }
+            return self.call(method.obj.asClosure(), argCount);
+        }
+
+        fn invoke(self: *Self, name: *ObjString, argCount: u8) bool {
+            const receiver = self.peek(argCount);
+
+            if (!receiver.isInstance()) {
+                self.runtimeError("Only instances have methods.", .{});
+                return false;
+            }
+
+            const instance = receiver.obj.asInstance();
+
+            var value: Value = undefined;
+            if (instance.fields.get(name, &value)) {
+                self.stack[self.stackTop - argCount - 1] = value;
+                return self.callValue(value, argCount);
+            }
+
+            return self.invokeFromClass(instance.klass, name, argCount);
         }
 
         fn bindMethod(self: *Self, klass: *ObjClass, name: *ObjString) bool {
@@ -679,7 +715,7 @@ pub fn VM(comptime flags: Flags) type {
     };
 }
 
-fn clockNative(argCount: usize, args: []Value) Value {
+fn clockNative(argCount: u8, args: []Value) Value {
     _ = argCount;
     _ = args;
     return .{ .number = @intToFloat(f64, std.time.milliTimestamp()) / 1000.0 };
