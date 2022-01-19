@@ -35,6 +35,7 @@ pub const OpCode = enum {
     CLOSE_UPVALUE,
     RETURN,
     CLASS,
+    METHOD,
 };
 
 pub const Flags = struct {

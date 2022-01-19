@@ -158,6 +158,7 @@ pub const ObjClosure = struct {
 };
 
 pub const ObjType = enum {
+    boundMethod,
     class,
     closure,
     function,
@@ -176,6 +177,10 @@ pub const Obj = struct {
 
     pub fn asInstance(self: *Self) *ObjInstance {
         return @ptrCast(*ObjInstance, self);
+    }
+
+    pub fn asBoundMethod(self: *Self) *ObjBoundMethod {
+        return @ptrCast(*ObjBoundMethod, self);
     }
 
     pub fn asClass(self: *Self) *ObjClass {
@@ -227,8 +232,15 @@ pub const Obj = struct {
             print("\n", .{});
         }
         switch (self.type) {
+            ObjType.boundMethod => {
+                var bound = self.asBoundMethod();
+                bound.receiver.mark();
+                bound.method.obj.mark();
+            },
             ObjType.class => {
-                self.asClass().name.obj.mark();
+                var klass = self.asClass();
+                klass.methods.mark();
+                klass.name.obj.mark();
             },
             ObjType.native => {},
             ObjType.string => {},
@@ -268,8 +280,13 @@ pub const Obj = struct {
             print("\n", .{});
         }
         switch (self.type) {
+            ObjType.boundMethod => {
+                var bound = self.asBoundMethod();
+                destroy(bound);
+            },
             ObjType.class => {
                 var klass = self.asClass();
+                klass.methods.deinit();
                 destroy(klass);
             },
             ObjType.closure => {
@@ -306,6 +323,7 @@ pub const Obj = struct {
 
 pub fn printObject(obj: *Obj) void {
     switch (obj.type) {
+        ObjType.boundMethod => printFunction(obj.asBoundMethod().method.function),
         ObjType.class => print("<class {s}>", .{obj.asClass().name.chars}),
         ObjType.instance => print("<{s} instance>", .{obj.asInstance().klass.name.chars}),
         ObjType.closure => printFunction(obj.asClosure().function),
@@ -334,7 +352,7 @@ pub const ObjFunction = struct {
     name: ?*ObjString,
 
     pub fn init(objects: *Objects) *Self {
-        var function = objects.allocateObject(ObjFunction, ObjType.function);
+        var function = objects.allocateObject(Self, ObjType.function);
         function.arity = 0;
         function.upvalueCount = 0;
         function.name = null;
@@ -361,7 +379,7 @@ pub const ObjNative = struct {
     function: NativeFn,
 
     pub fn init(objects: *Objects, function: NativeFn) *Self {
-        var native = objects.allocateObject(ObjNative, ObjType.native);
+        var native = objects.allocateObject(Self, ObjType.native);
         native.function = function;
         return native;
     }
@@ -376,10 +394,12 @@ pub const ObjClass = struct {
 
     obj: Obj,
     name: *ObjString,
+    methods: Table,
 
     pub fn init(objects: *Objects, name: *ObjString) *Self {
-        var klass = objects.allocateObject(ObjClass, ObjType.class);
+        var klass = objects.allocateObject(Self, ObjType.class);
         klass.name = name;
+        klass.methods = Table.init();
         return klass;
     }
 
@@ -396,10 +416,29 @@ pub const ObjInstance = struct {
     fields: Table,
 
     pub fn init(objects: *Objects, klass: *ObjClass) *Self {
-        var instance = objects.allocateObject(ObjInstance, ObjType.instance);
+        var instance = objects.allocateObject(Self, ObjType.instance);
         instance.klass = klass;
         instance.fields = Table.init();
         return instance;
+    }
+
+    pub fn asObj(self: *Self) *Obj {
+        return @ptrCast(*Obj, self);
+    }
+};
+
+pub const ObjBoundMethod = struct {
+    const Self = @This();
+
+    obj: Obj,
+    receiver: Value,
+    method: *ObjClosure,
+
+    pub fn init(objects: *Objects, receiver: Value, method: *ObjClosure) *Self {
+        var bound = objects.allocateObject(Self, ObjType.boundMethod);
+        bound.receiver = receiver;
+        bound.method = method;
+        return bound;
     }
 
     pub fn asObj(self: *Self) *Obj {

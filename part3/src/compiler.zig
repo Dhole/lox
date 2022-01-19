@@ -37,19 +37,21 @@ UNARY, // ! -
 CALL, // . ()
 PRIMARY };
 
-pub const Local = struct {
+const Local = struct {
     name: Token,
     depth: isize,
     isCaptured: bool,
 };
 
-pub const Upvalue = struct {
+const Upvalue = struct {
     index: u8,
     isLocal: bool,
 };
 
-pub const FunctionType = enum {
+const FunctionType = enum {
     FUNCTION,
+    INITIALIZER,
+    METHOD,
     SCRIPT,
 };
 
@@ -78,10 +80,18 @@ pub const Compiler = struct {
         self.localCount += 1;
         local.depth = 0;
         local.isCaptured = false;
-        local.name.value = "";
+        if (typ != FunctionType.FUNCTION) {
+            local.name.value = "this";
+        } else {
+            local.name.value = "";
+        }
 
         return self;
     }
+};
+
+const ClassCompiler = struct {
+    enclosing: ?*ClassCompiler,
 };
 
 pub fn Parser(comptime flags: Flags) type {
@@ -103,6 +113,7 @@ pub fn Parser(comptime flags: Flags) type {
         // current in the book
         compiler: *Compiler,
         compilerSet: bool,
+        currentClass: ?*ClassCompiler,
         objects: *Objects,
         hadError: bool,
         panicMode: bool,
@@ -114,6 +125,7 @@ pub fn Parser(comptime flags: Flags) type {
                 .scanner = undefined,
                 .compiler = undefined,
                 .compilerSet = false,
+                .currentClass = null,
                 .objects = undefined,
                 .hadError = false,
                 .panicMode = false,
@@ -199,16 +211,41 @@ pub fn Parser(comptime flags: Flags) type {
             }
         }
 
+        fn method(self: *Self) void {
+            self.consume(TT.IDENTIFIER, "Expect method name.");
+            const constant = self.identifierConstant(&self.previous);
+
+            var typ = FunctionType.METHOD;
+            if (std.mem.eql(u8, self.previous.value, "init")) {
+                typ = FunctionType.INITIALIZER;
+            }
+            self.function(typ);
+            self.emitBytes(@enumToInt(OpCode.METHOD), constant);
+        }
+
         fn classDeclaration(self: *Self) void {
             self.consume(TT.IDENTIFIER, "Expect class name.");
+            const className = self.previous;
             const nameConstant = self.identifierConstant(&self.previous);
             self.declareVariable();
 
             self.emitBytes(@enumToInt(OpCode.CLASS), nameConstant);
             self.defineVariable(nameConstant);
 
+            var classCompiler: ClassCompiler = undefined;
+            classCompiler.enclosing = self.currentClass;
+            self.currentClass = &classCompiler;
+
+            self.namedVariable(className, false);
+
             self.consume(TT.LEFT_BRACE, "Expect '{' before class body.");
+            while (!self.check(TT.RIGHT_BRACE) and !self.check(TT.EOF)) {
+                self.method();
+            }
             self.consume(TT.RIGHT_BRACE, "Expect '}' after class body.");
+            self.emitByte(@enumToInt(OpCode.POP));
+
+            self.currentClass = self.currentClass.?.enclosing;
         }
 
         fn funDeclaration(self: *Self) void {
@@ -307,6 +344,8 @@ pub fn Parser(comptime flags: Flags) type {
         fn returnStatement(self: *Self) void {
             if (self.compiler.type == FunctionType.SCRIPT) {
                 self.err("Can't return from top-level code.");
+            } else if (self.compiler.type == FunctionType.INITIALIZER) {
+                self.err("Can't return a value from an initializer.");
             }
 
             if (self.match(TT.SEMICOLON)) {
@@ -449,7 +488,11 @@ pub fn Parser(comptime flags: Flags) type {
         }
 
         fn emitReturn(self: *Self) void {
-            self.emitByte(@enumToInt(OpCode.NIL));
+            if (self.compiler.type == FunctionType.INITIALIZER) {
+                self.emitBytes(@enumToInt(OpCode.GET_LOCAL), 0);
+            } else {
+                self.emitByte(@enumToInt(OpCode.NIL));
+            }
             self.emitByte(@enumToInt(OpCode.RETURN));
         }
 
@@ -625,6 +668,15 @@ pub fn Parser(comptime flags: Flags) type {
 
         fn variable(self: *Self, canAssign: bool) void {
             self.namedVariable(self.previous, canAssign);
+        }
+
+        fn this(self: *Self, canAssign: bool) void {
+            if (self.currentClass == null) {
+                self.err("Can't use 'this' outside of a class.");
+                return;
+            }
+            _ = canAssign;
+            self.variable(false);
         }
 
         fn unary(self: *Self, canAssign: bool) void {
@@ -882,7 +934,7 @@ pub fn Parser(comptime flags: Flags) type {
             _rules[@enumToInt(TT.PRINT)] = .{ .prefix = null, .infix = null, .precedence = Precedence.NONE };
             _rules[@enumToInt(TT.RETURN)] = .{ .prefix = null, .infix = null, .precedence = Precedence.NONE };
             _rules[@enumToInt(TT.SUPER)] = .{ .prefix = null, .infix = null, .precedence = Precedence.NONE };
-            _rules[@enumToInt(TT.THIS)] = .{ .prefix = null, .infix = null, .precedence = Precedence.NONE };
+            _rules[@enumToInt(TT.THIS)] = .{ .prefix = &this, .infix = null, .precedence = Precedence.NONE };
             _rules[@enumToInt(TT.TRUE)] = .{ .prefix = &literal, .infix = null, .precedence = Precedence.NONE };
             _rules[@enumToInt(TT.VAR)] = .{ .prefix = null, .infix = null, .precedence = Precedence.NONE };
             _rules[@enumToInt(TT.WHILE)] = .{ .prefix = null, .infix = null, .precedence = Precedence.NONE };

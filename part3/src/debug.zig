@@ -58,6 +58,7 @@ pub fn disassembleInstruction(chunk: *Chunk, offset: usize) usize {
         @enumToInt(OpCode.CLOSE_UPVALUE) => simpleInstruction("OP_CLOSE_UPVALUE", offset),
         @enumToInt(OpCode.RETURN) => simpleInstruction("OP_RETURN", offset),
         @enumToInt(OpCode.CLASS) => constantInstruction("OP_CLASS", chunk, offset),
+        @enumToInt(OpCode.METHOD) => constantInstruction("OP_METHOD", chunk, offset),
         @enumToInt(OpCode.CONSTANT) => constantInstruction("OP_CONSTANT", chunk, offset),
         @enumToInt(OpCode.NIL) => simpleInstruction("OP_NIL", offset),
         @enumToInt(OpCode.TRUE) => simpleInstruction("OP_TRUE", offset),

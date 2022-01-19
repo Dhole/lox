@@ -31,6 +31,7 @@ const ObjType = _object.ObjType;
 const ObjNative = _object.ObjNative;
 const ObjClass = _object.ObjClass;
 const ObjInstance = _object.ObjInstance;
+const ObjBoundMethod = _object.ObjBoundMethod;
 const NativeFn = _object.NativeFn;
 const allocate = _memory.allocate;
 const allocator = _memory.allocator;
@@ -70,6 +71,7 @@ pub fn VM(comptime flags: Flags) type {
         stackTop: usize,
         globals: Table,
         openUpvalues: ?*ObjUpvalue,
+        initString: ?*ObjString,
         parser: ?*Parser(flags),
 
         bytesAllocated: usize,
@@ -88,6 +90,7 @@ pub fn VM(comptime flags: Flags) type {
                 .frameCount = 0,
                 .globals = Table.init(),
                 .openUpvalues = null,
+                .initString = null,
                 .parser = null,
                 .bytesAllocated = 0,
                 .nextGC = 1024 * 1024,
@@ -96,6 +99,7 @@ pub fn VM(comptime flags: Flags) type {
                 .grayStack = &[_]*Obj{},
             };
             _global.setVM(&self);
+            self.initString = self.objects.copyString("init");
             self.defineNative("clock", clockNative);
             return self;
         }
@@ -103,6 +107,7 @@ pub fn VM(comptime flags: Flags) type {
         pub fn deinit(self: *Self) void {
             self.globals.deinit();
             self.objects.deinit();
+            self.initString = null;
             if (self.grayStack.len != 0) {
                 allocator.free(self.grayStack);
             }
@@ -227,8 +232,7 @@ pub fn VM(comptime flags: Flags) type {
                         if (instance.fields.get(name, &value)) {
                             _ = self.pop(); // Instance.
                             self.push(value);
-                        } else {
-                            self.runtimeError("Undefined property '{s}'.", .{name.chars});
+                        } else if (!self.bindMethod(instance.klass, name)) {
                             return InterpretError.Runtime;
                         }
                     },
@@ -348,6 +352,9 @@ pub fn VM(comptime flags: Flags) type {
                     @enumToInt(OpCode.CLASS) => {
                         self.push(.{ .obj = ObjClass.init(&self.objects, self.readString()).asObj() });
                     },
+                    @enumToInt(OpCode.METHOD) => {
+                        self.defineMethod(self.readString());
+                    },
                     else => {
                         return InterpretError.Runtime;
                     },
@@ -447,10 +454,22 @@ pub fn VM(comptime flags: Flags) type {
             switch (callee) {
                 Value.obj => |obj| {
                     switch (obj.type) {
+                        ObjType.boundMethod => {
+                            const bound = obj.asBoundMethod();
+                            self.stack[self.stackTop - argCount - 1] = bound.receiver;
+                            return self.call(bound.method, argCount);
+                        },
                         ObjType.class => {
                             const klass = obj.asClass();
                             self.stack[self.stackTop - argCount - 1] =
                                 .{ .obj = ObjInstance.init(&self.objects, klass).asObj() };
+                            var initializer: Value = undefined;
+                            if (klass.methods.get(self.initString.?, &initializer)) {
+                                return self.call(initializer.obj.asClosure(), argCount);
+                            } else if (argCount != 0) {
+                                self.runtimeError("Expected 0 arguments but got {d}.", .{argCount});
+                                return false;
+                            }
                             return true;
                         },
                         ObjType.closure => return self.call(obj.asClosure(), argCount),
@@ -468,6 +487,20 @@ pub fn VM(comptime flags: Flags) type {
             }
             self.runtimeError("Can only call functions and classes.", .{});
             return false;
+        }
+
+        fn bindMethod(self: *Self, klass: *ObjClass, name: *ObjString) bool {
+            var method: Value = undefined;
+            if (!klass.methods.get(name, &method)) {
+                self.runtimeError("Undefined property or method '{s}'.", .{name.chars});
+                return false;
+            }
+
+            const bound = ObjBoundMethod.init(&self.objects, self.peek(0), method.obj.asClosure());
+
+            _ = self.pop();
+            self.push(.{ .obj = bound.asObj() });
+            return true;
         }
 
         fn captureUpvalue(self: *Self, local: *Value) *ObjUpvalue {
@@ -509,6 +542,13 @@ pub fn VM(comptime flags: Flags) type {
                 upvalue.location = &upvalue.closed;
                 self.openUpvalues = upvalue.next;
             }
+        }
+
+        fn defineMethod(self: *Self, name: *ObjString) void {
+            const method = self.peek(0);
+            var klass = self.peek(1).obj.asClass();
+            _ = klass.methods.set(name, method);
+            _ = self.pop();
         }
 
         fn isFalsey(value: Value) bool {
@@ -599,6 +639,9 @@ pub fn VM(comptime flags: Flags) type {
             self.globals.mark();
             if (self.parser) |parser| {
                 parser.markCompilerRoots();
+            }
+            if (self.initString) |initString| {
+                initString.obj.mark();
             }
         }
 
