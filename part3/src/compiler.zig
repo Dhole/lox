@@ -92,6 +92,7 @@ pub const Compiler = struct {
 
 const ClassCompiler = struct {
     enclosing: ?*ClassCompiler,
+    hasSuperclass: bool,
 };
 
 pub fn Parser(comptime flags: Flags) type {
@@ -233,8 +234,25 @@ pub fn Parser(comptime flags: Flags) type {
             self.defineVariable(nameConstant);
 
             var classCompiler: ClassCompiler = undefined;
+            classCompiler.hasSuperclass = false;
             classCompiler.enclosing = self.currentClass;
             self.currentClass = &classCompiler;
+
+            if (self.match(TT.LESS)) {
+                self.consume(TT.IDENTIFIER, "Expect superclass name.");
+                self.variable(false);
+                if (identifiersEqual(&className, &self.previous)) {
+                    self.err("A class can't inherit from itself.");
+                }
+
+                self.beginScope();
+                self.addLocal(syntheticToken("super"));
+                self.defineVariable(0);
+
+                self.namedVariable(className, false);
+                self.emitByte(@enumToInt(OpCode.INHERIT));
+                classCompiler.hasSuperclass = true;
+            }
 
             self.namedVariable(className, false);
 
@@ -244,6 +262,10 @@ pub fn Parser(comptime flags: Flags) type {
             }
             self.consume(TT.RIGHT_BRACE, "Expect '}' after class body.");
             self.emitByte(@enumToInt(OpCode.POP));
+
+            if (self.currentClass.?.hasSuperclass) {
+                self.endScope();
+            }
 
             self.currentClass = self.currentClass.?.enclosing;
         }
@@ -674,6 +696,35 @@ pub fn Parser(comptime flags: Flags) type {
             self.namedVariable(self.previous, canAssign);
         }
 
+        fn syntheticToken(text: []const u8) Token {
+            return Token{ .type = TT.IDENTIFIER, .value = text, .line = 0 };
+        }
+
+        fn super(self: *Self, canAssign: bool) void {
+            _ = canAssign;
+
+            if (self.currentClass == null) {
+                self.err("Can't use 'super' outside of a class.");
+            } else if (!self.currentClass.?.hasSuperclass) {
+                self.err("Can't use 'super' in a class with no superclass.");
+            }
+
+            self.consume(TT.DOT, "Expect '.' after 'super'.");
+            self.consume(TT.IDENTIFIER, "Expect superclass method name.");
+            const name = self.identifierConstant(&self.previous);
+
+            self.namedVariable(syntheticToken("this"), false);
+            if (self.match(TT.LEFT_PAREN)) {
+                const argCount = self.argumentList();
+                self.namedVariable(syntheticToken("super"), false);
+                self.emitBytes(@enumToInt(OpCode.SUPER_INVOKE), name);
+                self.emitByte(argCount);
+            } else {
+                self.namedVariable(syntheticToken("super"), false);
+                self.emitBytes(@enumToInt(OpCode.GET_SUPER), name);
+            }
+        }
+
         fn this(self: *Self, canAssign: bool) void {
             if (self.currentClass == null) {
                 self.err("Can't use 'this' outside of a class.");
@@ -937,7 +988,7 @@ pub fn Parser(comptime flags: Flags) type {
             _rules[@enumToInt(TT.OR)] = .{ .prefix = null, .infix = &or_, .precedence = Precedence.OR };
             _rules[@enumToInt(TT.PRINT)] = .{ .prefix = null, .infix = null, .precedence = Precedence.NONE };
             _rules[@enumToInt(TT.RETURN)] = .{ .prefix = null, .infix = null, .precedence = Precedence.NONE };
-            _rules[@enumToInt(TT.SUPER)] = .{ .prefix = null, .infix = null, .precedence = Precedence.NONE };
+            _rules[@enumToInt(TT.SUPER)] = .{ .prefix = &super, .infix = null, .precedence = Precedence.NONE };
             _rules[@enumToInt(TT.THIS)] = .{ .prefix = &this, .infix = null, .precedence = Precedence.NONE };
             _rules[@enumToInt(TT.TRUE)] = .{ .prefix = &literal, .infix = null, .precedence = Precedence.NONE };
             _rules[@enumToInt(TT.VAR)] = .{ .prefix = null, .infix = null, .precedence = Precedence.NONE };

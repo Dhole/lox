@@ -248,6 +248,14 @@ pub fn VM(comptime flags: Flags) type {
                         _ = self.pop();
                         self.push(value);
                     },
+                    @enumToInt(OpCode.GET_SUPER) => {
+                        const name = self.readString();
+                        const superclass = self.pop().obj.asClass();
+
+                        if (!self.bindMethod(superclass, name)) {
+                            return InterpretError.Runtime;
+                        }
+                    },
                     @enumToInt(OpCode.EQUAL) => {
                         const b = self.pop();
                         const a = self.pop();
@@ -326,6 +334,15 @@ pub fn VM(comptime flags: Flags) type {
                         }
                         self.frame = &self.frames[self.frameCount - 1];
                     },
+                    @enumToInt(OpCode.SUPER_INVOKE) => {
+                        const method = self.readString();
+                        const argCount = self.readByte();
+                        const superclass = self.pop().obj.asClass();
+                        if (!self.invokeFromClass(superclass, method, argCount)) {
+                            return InterpretError.Runtime;
+                        }
+                        self.frame = &self.frames[self.frameCount - 1];
+                    },
                     @enumToInt(OpCode.CLOSURE) => {
                         const function = self.readConstant().obj.asFunction();
                         const closure = ObjClosure.init(&self.objects, function);
@@ -359,6 +376,17 @@ pub fn VM(comptime flags: Flags) type {
                     },
                     @enumToInt(OpCode.CLASS) => {
                         self.push(.{ .obj = ObjClass.init(&self.objects, self.readString()).asObj() });
+                    },
+                    @enumToInt(OpCode.INHERIT) => {
+                        const superclass = self.peek(1);
+                        if (!superclass.isClass()) {
+                            self.runtimeError("Superclass must be a class.", .{});
+                            return InterpretError.Runtime;
+                        }
+
+                        var subclass = self.peek(0).obj.asClass();
+                        subclass.methods.addAll(&superclass.obj.asClass().methods);
+                        _ = self.pop(); // Subclass.
                     },
                     @enumToInt(OpCode.METHOD) => {
                         self.defineMethod(self.readString());

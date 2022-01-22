@@ -72,6 +72,13 @@ pub const Value = union(ValueType) {
         };
     }
 
+    pub fn isClass(self: *const Self) bool {
+        return switch (self.*) {
+            Value.obj => |obj| obj.type == ObjType.class,
+            else => false,
+        };
+    }
+
     pub fn equals(self: *const Self, b: Value) bool {
         if (@as(ValueType, self.*) != @as(ValueType, b)) {
             return false;

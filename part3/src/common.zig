@@ -17,6 +17,7 @@ pub const OpCode = enum {
     SET_UPVALUE,
     GET_PROPERTY,
     SET_PROPERTY,
+    GET_SUPER,
     EQUAL,
     GREATER,
     LESS,
@@ -32,10 +33,12 @@ pub const OpCode = enum {
     LOOP,
     CALL,
     INVOKE,
+    SUPER_INVOKE,
     CLOSURE,
     CLOSE_UPVALUE,
     RETURN,
     CLASS,
+    INHERIT,
     METHOD,
 };
 

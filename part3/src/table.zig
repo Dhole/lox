@@ -46,7 +46,7 @@ pub const Table = struct {
 
     fn findEntry(self: *Self, key: *ObjString) *Entry {
         const capacity = self.entries.len;
-        var index = key.hash % capacity;
+        var index = key.hash & (capacity - 1);
         var tombstone: ?*Entry = null;
         while (true) {
             const entry = &self.entries[index];
@@ -71,7 +71,7 @@ pub const Table = struct {
                 }
             }
 
-            index = (index + 1) % capacity;
+            index = (index + 1) & (capacity - 1);
         }
     }
 
@@ -80,7 +80,7 @@ pub const Table = struct {
             return null;
         }
         const capacity = self.entries.len;
-        var index = hash % capacity;
+        var index = hash & (capacity - 1);
         while (true) {
             const entry = &self.entries[index];
             if (entry.key) |key| {
@@ -97,7 +97,7 @@ pub const Table = struct {
                     return null;
                 }
             }
-            index = (index + 1) % capacity;
+            index = (index + 1) & (capacity - 1);
         }
     }
 
@@ -194,8 +194,8 @@ pub const Table = struct {
 
     pub fn addAll(self: *Self, from: *Self) void {
         for (from.entries) |*entry| {
-            if (entry.key != null) {
-                self.set(entry.key, entry.value);
+            if (entry.key) |key| {
+                _ = self.set(key, entry.value);
             }
         }
     }

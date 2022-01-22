@@ -35,6 +35,7 @@ pub fn disassembleInstruction(chunk: *Chunk, offset: usize) usize {
         @enumToInt(OpCode.LOOP) => jumpInstruction("OP_LOOP", -1, chunk, offset),
         @enumToInt(OpCode.CALL) => byteInstruction("OP_CALL", chunk, offset),
         @enumToInt(OpCode.INVOKE) => invokeInstruction("OP_INVOKE", chunk, offset),
+        @enumToInt(OpCode.SUPER_INVOKE) => invokeInstruction("OP_SUPER_INVOKE", chunk, offset),
         @enumToInt(OpCode.CLOSURE) => blk: {
             offset += 1;
             const constant = chunk.code[offset + 1];
@@ -59,6 +60,7 @@ pub fn disassembleInstruction(chunk: *Chunk, offset: usize) usize {
         @enumToInt(OpCode.CLOSE_UPVALUE) => simpleInstruction("OP_CLOSE_UPVALUE", offset),
         @enumToInt(OpCode.RETURN) => simpleInstruction("OP_RETURN", offset),
         @enumToInt(OpCode.CLASS) => constantInstruction("OP_CLASS", chunk, offset),
+        @enumToInt(OpCode.INHERIT) => simpleInstruction("OP_INHERIT", offset),
         @enumToInt(OpCode.METHOD) => constantInstruction("OP_METHOD", chunk, offset),
         @enumToInt(OpCode.CONSTANT) => constantInstruction("OP_CONSTANT", chunk, offset),
         @enumToInt(OpCode.NIL) => simpleInstruction("OP_NIL", offset),
@@ -74,6 +76,7 @@ pub fn disassembleInstruction(chunk: *Chunk, offset: usize) usize {
         @enumToInt(OpCode.SET_UPVALUE) => byteInstruction("OP_SET_UPVALUE", chunk, offset),
         @enumToInt(OpCode.GET_PROPERTY) => constantInstruction("OP_GET_PROPERTY", chunk, offset),
         @enumToInt(OpCode.SET_PROPERTY) => constantInstruction("OP_SET_PROPERTY", chunk, offset),
+        @enumToInt(OpCode.GET_SUPER) => constantInstruction("OP_GET_SUPER", chunk, offset),
         @enumToInt(OpCode.EQUAL) => simpleInstruction("OP_EQUAL", offset),
         @enumToInt(OpCode.GREATER) => simpleInstruction("OP_GREATER", offset),
         @enumToInt(OpCode.LESS) => simpleInstruction("OP_LESS", offset),
