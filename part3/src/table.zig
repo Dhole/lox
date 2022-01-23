@@ -129,7 +129,7 @@ pub const Table = struct {
         var entries = allocate(Entry, capacity);
         for (entries) |*entry| {
             entry.key = null;
-            entry.value = .nil;
+            entry.value = Value.initNil();
         }
         const oldEntries = self.entries;
         self.entries = entries;
@@ -188,7 +188,7 @@ pub const Table = struct {
 
         // Place a tombstone in the entry.
         entry.key = null;
-        entry.value = .{ .boolean = true };
+        entry.value = Value.initBool(true);
         return true;
     }
 

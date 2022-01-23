@@ -1,6 +1,6 @@
 # Lox interpreter implemented in Zig
 
-**Work In Progress**
+**Complete**
 
 This is the implementation of the Lox interpreter explained in this book:
 http://craftinginterpreters.com/contents.html but in Zig.
@@ -23,3 +23,7 @@ I'm writing it while following the book.
       Since I did part2 in Zig, which doesn't have a garbage collector, I'm OK
       with having memory leaks (which can be fixed by implementing a garbage
       collector explained in part 3).
+
+- Part3 is complete!
+    - This implementation should be sound and should not leak any memory,
+      unlike my implementation of Part2 :)

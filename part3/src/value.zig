@@ -11,6 +11,14 @@ const Obj = _object.Obj;
 const ObjType = _object.ObjType;
 const printObject = _object.printObject;
 
+const QNAN: u64 = 0x7ffc000000000000;
+const SIGN_BIT: u64 = 0x8000000000000000;
+const TAG_NIL: u64 = 1; // 01.
+const TAG_FALSE: u64 = 2; // 10.
+const TAG_TRUE: u64 = 3; // 11.
+
+const nanBoxing: bool = true;
+
 pub const ValueType = enum {
     boolean,
     nil,
@@ -18,7 +26,103 @@ pub const ValueType = enum {
     obj,
 };
 
-pub const Value = union(ValueType) {
+pub const Value = if (nanBoxing) ValueNanBoxing else ValueRegular;
+
+pub const ValueNanBoxing = struct {
+    const Self = @This();
+
+    value: u64,
+
+    pub fn initNumber(value: f64) Self {
+        var cpy = value;
+        return Self{ .value = @ptrCast(*u64, &cpy).* };
+    }
+
+    pub fn asNumber(self: Self) f64 {
+        var cpy = self.value;
+        return @ptrCast(*f64, &cpy).*;
+    }
+
+    pub fn isNumber(self: Self) bool {
+        return (self.value & QNAN) != QNAN;
+    }
+
+    pub fn initBool(value: bool) Self {
+        return Self{ .value = if (value)
+            QNAN | TAG_TRUE
+        else
+            QNAN | TAG_FALSE };
+    }
+
+    pub fn isBool(self: Self) bool {
+        return self.value | 1 == QNAN | TAG_TRUE;
+    }
+
+    pub fn asBool(self: Self) bool {
+        return self.value == QNAN | TAG_TRUE;
+    }
+
+    pub fn initNil() Self {
+        return Self{ .value = QNAN | TAG_NIL };
+    }
+
+    pub fn isNil(self: Self) bool {
+        return self.value == QNAN | TAG_NIL;
+    }
+
+    pub fn asNil(self: Self) void {
+        _ = self;
+        return void;
+    }
+
+    pub fn initObj(object: *Obj) Self {
+        return Self{ .value = @ptrToInt(object) | SIGN_BIT | QNAN };
+    }
+
+    pub fn isObj(self: Self) bool {
+        return self.value & (SIGN_BIT | QNAN) == (SIGN_BIT | QNAN);
+    }
+
+    pub fn asObj(self: *const Self) *Obj {
+        return @intToPtr(*Obj, self.value & ~(SIGN_BIT | QNAN));
+    }
+
+    pub fn isString(self: Self) bool {
+        return if (self.isObj())
+            self.asObj().type == ObjType.string
+        else
+            false;
+    }
+
+    pub fn isInstance(self: Self) bool {
+        return if (self.isObj())
+            self.asObj().type == ObjType.instance
+        else
+            false;
+    }
+
+    pub fn isClass(self: Self) bool {
+        return if (self.isObj())
+            self.asObj().type == ObjType.class
+        else
+            false;
+    }
+
+    pub fn equals(self: Self, b: Self) bool {
+        if (self.isNumber() and b.isNumber()) {
+            return self.asNumber() == b.asNumber();
+        }
+        return self.value == b.value;
+    }
+
+    pub fn mark(self: Self) void {
+        if (self.isObj()) {
+            self.asObj().mark();
+        }
+    }
+};
+
+pub const ValueRegular = union(ValueType) {
     const Self = @This();
 
     boolean: bool,
@@ -79,7 +183,23 @@ pub const Value = union(ValueType) {
         };
     }
 
-    pub fn equals(self: *const Self, b: Value) bool {
+    pub fn asBool(self: *const Self) bool {
+        return self.boolean;
+    }
+
+    pub fn asNil(self: *const Self) void {
+        return self.nil;
+    }
+
+    pub fn asNumber(self: *const Self) f64 {
+        return self.number;
+    }
+
+    pub fn asObj(self: *const Self) *Obj {
+        return self.obj;
+    }
+
+    pub fn equals(self: *const Self, b: Self) bool {
         if (@as(ValueType, self.*) != @as(ValueType, b)) {
             return false;
         }
@@ -104,11 +224,14 @@ fn booleanStr(boolean: bool) []const u8 {
 }
 
 pub fn printValue(val: Value) void {
-    switch (val) {
-        Value.boolean => |boolean| print("{s}", .{booleanStr(boolean)}),
-        Value.nil => print("nil", .{}),
-        Value.number => |number| print("{d}", .{number}),
-        Value.obj => |obj| printObject(obj),
+    if (val.isBool()) {
+        print("{s}", .{booleanStr(val.asBool())});
+    } else if (val.isNil()) {
+        print("nil", .{});
+    } else if (val.isNumber()) {
+        print("{d}", .{val.asNumber()});
+    } else if (val.isObj()) {
+        printObject(val.asObj());
     }
 }
 

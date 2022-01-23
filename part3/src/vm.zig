@@ -144,10 +144,10 @@ pub fn VM(comptime flags: Flags) type {
                     return InterpretResult.COMPILE_ERROR;
                 }
             };
-            self.push(.{ .obj = function.asObj() });
+            self.push(Value.initObj(function.asObj()));
             const closure = ObjClosure.init(&self.objects, function);
             _ = self.pop();
-            self.push(.{ .obj = closure.asObj() });
+            self.push(Value.initObj(closure.asObj()));
             if (!self.call(closure, 0)) {
                 @panic("script call");
             }
@@ -183,9 +183,9 @@ pub fn VM(comptime flags: Flags) type {
                         const constant = self.readConstant();
                         self.push(constant);
                     },
-                    @enumToInt(OpCode.NIL) => self.push(.nil),
-                    @enumToInt(OpCode.TRUE) => self.push(.{ .boolean = true }),
-                    @enumToInt(OpCode.FALSE) => self.push(.{ .boolean = false }),
+                    @enumToInt(OpCode.NIL) => self.push(Value.initNil()),
+                    @enumToInt(OpCode.TRUE) => self.push(Value.initBool(true)),
+                    @enumToInt(OpCode.FALSE) => self.push(Value.initBool(false)),
                     @enumToInt(OpCode.POP) => {
                         _ = self.pop();
                     },
@@ -225,7 +225,7 @@ pub fn VM(comptime flags: Flags) type {
                             return InterpretError.Runtime;
                         }
 
-                        const instance = self.peek(0).obj.asInstance();
+                        const instance = self.peek(0).asObj().asInstance();
                         const name = self.readString();
 
                         var value: Value = undefined;
@@ -242,7 +242,7 @@ pub fn VM(comptime flags: Flags) type {
                             return InterpretError.Runtime;
                         }
 
-                        const instance = self.peek(1).obj.asInstance();
+                        const instance = self.peek(1).asObj().asInstance();
                         _ = instance.fields.set(self.readString(), self.peek(0));
                         const value = self.pop();
                         _ = self.pop();
@@ -250,7 +250,7 @@ pub fn VM(comptime flags: Flags) type {
                     },
                     @enumToInt(OpCode.GET_SUPER) => {
                         const name = self.readString();
-                        const superclass = self.pop().obj.asClass();
+                        const superclass = self.pop().asObj().asClass();
 
                         if (!self.bindMethod(superclass, name)) {
                             return InterpretError.Runtime;
@@ -259,7 +259,7 @@ pub fn VM(comptime flags: Flags) type {
                     @enumToInt(OpCode.EQUAL) => {
                         const b = self.pop();
                         const a = self.pop();
-                        self.push(.{ .boolean = a.equals(b) });
+                        self.push(Value.initBool(a.equals(b)));
                     },
                     @enumToInt(OpCode.GET_UPVALUE) => {
                         const slot = self.readByte();
@@ -272,15 +272,13 @@ pub fn VM(comptime flags: Flags) type {
                     @enumToInt(OpCode.GREATER) => try self.binaryOp(f64, bool, Value.initBool, greater),
                     @enumToInt(OpCode.LESS) => try self.binaryOp(f64, bool, Value.initBool, less),
                     @enumToInt(OpCode.NEGATE) => {
-                        switch (self.peek(0)) {
-                            ValueType.number => |v| {
-                                _ = self.pop();
-                                self.push(.{ .number = -v });
-                            },
-                            else => {
-                                self.runtimeError("Operand must be a number.", .{});
-                                return InterpretError.Runtime;
-                            },
+                        const val = self.peek(0);
+                        if (val.isNumber()) {
+                            _ = self.pop();
+                            self.push(Value.initNumber(-val.asNumber()));
+                        } else {
+                            self.runtimeError("Operand must be a number.", .{});
+                            return InterpretError.Runtime;
                         }
                     },
                     @enumToInt(OpCode.ADD) => {
@@ -291,7 +289,7 @@ pub fn VM(comptime flags: Flags) type {
                         } else if (a.isNumber() and b.isNumber()) {
                             _ = self.pop();
                             _ = self.pop();
-                            self.push(.{ .number = a.number + b.number });
+                            self.push(Value.initNumber(a.asNumber() + b.asNumber()));
                         } else {
                             self.runtimeError("Operands must be two numbers or two strings.", .{});
                             return InterpretError.Runtime;
@@ -300,7 +298,7 @@ pub fn VM(comptime flags: Flags) type {
                     @enumToInt(OpCode.SUBTRACT) => try self.binaryOp(f64, f64, Value.initNumber, sub),
                     @enumToInt(OpCode.MULTIPLY) => try self.binaryOp(f64, f64, Value.initNumber, mul),
                     @enumToInt(OpCode.DIVIDE) => try self.binaryOp(f64, f64, Value.initNumber, div),
-                    @enumToInt(OpCode.NOT) => self.push(.{ .boolean = isFalsey(self.pop()) }),
+                    @enumToInt(OpCode.NOT) => self.push(Value.initBool(isFalsey(self.pop()))),
                     @enumToInt(OpCode.JUMP) => {
                         const offset = self.readShort();
                         self.frame.pc += offset;
@@ -337,16 +335,16 @@ pub fn VM(comptime flags: Flags) type {
                     @enumToInt(OpCode.SUPER_INVOKE) => {
                         const method = self.readString();
                         const argCount = self.readByte();
-                        const superclass = self.pop().obj.asClass();
+                        const superclass = self.pop().asObj().asClass();
                         if (!self.invokeFromClass(superclass, method, argCount)) {
                             return InterpretError.Runtime;
                         }
                         self.frame = &self.frames[self.frameCount - 1];
                     },
                     @enumToInt(OpCode.CLOSURE) => {
-                        const function = self.readConstant().obj.asFunction();
+                        const function = self.readConstant().asObj().asFunction();
                         const closure = ObjClosure.init(&self.objects, function);
-                        self.push(.{ .obj = closure.asObj() });
+                        self.push(Value.initObj(closure.asObj()));
 
                         for (closure.upvalues) |*upvalue| {
                             const isLocal = self.readByte();
@@ -375,7 +373,7 @@ pub fn VM(comptime flags: Flags) type {
                         self.frame = &self.frames[self.frameCount - 1];
                     },
                     @enumToInt(OpCode.CLASS) => {
-                        self.push(.{ .obj = ObjClass.init(&self.objects, self.readString()).asObj() });
+                        self.push(Value.initObj(ObjClass.init(&self.objects, self.readString()).asObj()));
                     },
                     @enumToInt(OpCode.INHERIT) => {
                         const superclass = self.peek(1);
@@ -384,8 +382,8 @@ pub fn VM(comptime flags: Flags) type {
                             return InterpretError.Runtime;
                         }
 
-                        var subclass = self.peek(0).obj.asClass();
-                        subclass.methods.addAll(&superclass.obj.asClass().methods);
+                        var subclass = self.peek(0).asObj().asClass();
+                        subclass.methods.addAll(&superclass.asObj().asClass().methods);
                         _ = self.pop(); // Subclass.
                     },
                     @enumToInt(OpCode.METHOD) => {
@@ -424,19 +422,23 @@ pub fn VM(comptime flags: Flags) type {
             valueInit: fn (v: O) Value,
             op: fn (a: I, b: I) O,
         ) InterpretError!void {
-            const b = switch (self.peek(0)) {
-                ValueType.number => |b| b,
-                else => {
+            const b = blk: {
+                const val = self.peek(0);
+                if (val.isNumber()) {
+                    break :blk val.asNumber();
+                } else {
                     self.runtimeError("Operands must be numbers.", .{});
                     return InterpretError.Runtime;
-                },
+                }
             };
-            const a = switch (self.peek(1)) {
-                ValueType.number => |a| a,
-                else => {
+            const a = blk: {
+                const val = self.peek(1);
+                if (val.isNumber()) {
+                    break :blk val.asNumber();
+                } else {
                     self.runtimeError("Operands must be numbers.", .{});
                     return InterpretError.Runtime;
-                },
+                }
             };
             _ = self.pop();
             _ = self.pop();
@@ -455,7 +457,7 @@ pub fn VM(comptime flags: Flags) type {
         }
 
         fn readString(self: *Self) *ObjString {
-            return self.readConstant().obj.asString();
+            return self.readConstant().asObj().asString();
         }
 
         fn readShort(self: *Self) u16 {
@@ -487,39 +489,37 @@ pub fn VM(comptime flags: Flags) type {
         }
 
         fn callValue(self: *Self, callee: Value, argCount: u8) bool {
-            switch (callee) {
-                Value.obj => |obj| {
-                    switch (obj.type) {
-                        ObjType.boundMethod => {
-                            const bound = obj.asBoundMethod();
-                            self.stack[self.stackTop - argCount - 1] = bound.receiver;
-                            return self.call(bound.method, argCount);
-                        },
-                        ObjType.class => {
-                            const klass = obj.asClass();
-                            self.stack[self.stackTop - argCount - 1] =
-                                .{ .obj = ObjInstance.init(&self.objects, klass).asObj() };
-                            var initializer: Value = undefined;
-                            if (klass.methods.get(self.initString.?, &initializer)) {
-                                return self.call(initializer.obj.asClosure(), argCount);
-                            } else if (argCount != 0) {
-                                self.runtimeError("Expected 0 arguments but got {d}.", .{argCount});
-                                return false;
-                            }
-                            return true;
-                        },
-                        ObjType.closure => return self.call(obj.asClosure(), argCount),
-                        ObjType.native => {
-                            const native = obj.asNative();
-                            const result = native.function(argCount, self.stack[self.stackTop - argCount ..]);
-                            self.stackTop -= argCount + 1;
-                            self.push(result);
-                            return true;
-                        },
-                        else => {}, // Non-callable object type.
-                    }
-                },
-                else => {},
+            if (callee.isObj()) {
+                const obj = callee.asObj();
+                switch (obj.type) {
+                    ObjType.boundMethod => {
+                        const bound = obj.asBoundMethod();
+                        self.stack[self.stackTop - argCount - 1] = bound.receiver;
+                        return self.call(bound.method, argCount);
+                    },
+                    ObjType.class => {
+                        const klass = obj.asClass();
+                        self.stack[self.stackTop - argCount - 1] =
+                            Value.initObj(ObjInstance.init(&self.objects, klass).asObj());
+                        var initializer: Value = undefined;
+                        if (klass.methods.get(self.initString.?, &initializer)) {
+                            return self.call(initializer.asObj().asClosure(), argCount);
+                        } else if (argCount != 0) {
+                            self.runtimeError("Expected 0 arguments but got {d}.", .{argCount});
+                            return false;
+                        }
+                        return true;
+                    },
+                    ObjType.closure => return self.call(obj.asClosure(), argCount),
+                    ObjType.native => {
+                        const native = obj.asNative();
+                        const result = native.function(argCount, self.stack[self.stackTop - argCount ..]);
+                        self.stackTop -= argCount + 1;
+                        self.push(result);
+                        return true;
+                    },
+                    else => {}, // Non-callable object type.
+                }
             }
             self.runtimeError("Can only call functions and classes.", .{});
             return false;
@@ -531,7 +531,7 @@ pub fn VM(comptime flags: Flags) type {
                 self.runtimeError("Undefined property '{s}'.", .{name.chars});
                 return false;
             }
-            return self.call(method.obj.asClosure(), argCount);
+            return self.call(method.asObj().asClosure(), argCount);
         }
 
         fn invoke(self: *Self, name: *ObjString, argCount: u8) bool {
@@ -542,7 +542,7 @@ pub fn VM(comptime flags: Flags) type {
                 return false;
             }
 
-            const instance = receiver.obj.asInstance();
+            const instance = receiver.asObj().asInstance();
 
             var value: Value = undefined;
             if (instance.fields.get(name, &value)) {
@@ -560,10 +560,10 @@ pub fn VM(comptime flags: Flags) type {
                 return false;
             }
 
-            const bound = ObjBoundMethod.init(&self.objects, self.peek(0), method.obj.asClosure());
+            const bound = ObjBoundMethod.init(&self.objects, self.peek(0), method.asObj().asClosure());
 
             _ = self.pop();
-            self.push(.{ .obj = bound.asObj() });
+            self.push(Value.initObj(bound.asObj()));
             return true;
         }
 
@@ -610,22 +610,23 @@ pub fn VM(comptime flags: Flags) type {
 
         fn defineMethod(self: *Self, name: *ObjString) void {
             const method = self.peek(0);
-            var klass = self.peek(1).obj.asClass();
+            var klass = self.peek(1).asObj().asClass();
             _ = klass.methods.set(name, method);
             _ = self.pop();
         }
 
         fn isFalsey(value: Value) bool {
-            return switch (value) {
-                Value.nil => true,
-                Value.boolean => |boolean| !boolean,
-                else => false,
-            };
+            return if (value.isNil())
+                true
+            else if (value.isBool())
+                !value.asBool()
+            else
+                false;
         }
 
         fn concatenate(self: *Self) void {
-            const b = self.peek(0).obj.asString();
-            const a = self.peek(1).obj.asString();
+            const b = self.peek(0).asObj().asString();
+            const a = self.peek(1).asObj().asString();
 
             const length = a.chars.len + b.chars.len;
             var chars = allocate(u8, length);
@@ -634,7 +635,7 @@ pub fn VM(comptime flags: Flags) type {
             const res = self.objects.takeString(chars);
             _ = self.pop();
             _ = self.pop();
-            self.push(.{ .obj = res.asObj() });
+            self.push(Value.initObj(res.asObj()));
         }
 
         fn runtimeError(self: *Self, comptime fmt: []const u8, args: anytype) void {
@@ -656,9 +657,9 @@ pub fn VM(comptime flags: Flags) type {
         }
 
         fn defineNative(self: *Self, name: []const u8, function: NativeFn) void {
-            self.push(.{ .obj = self.objects.copyString(name).asObj() });
-            self.push(.{ .obj = ObjNative.init(&self.objects, function).asObj() });
-            _ = self.globals.set(self.stack[0].obj.asString(), self.stack[1]);
+            self.push(Value.initObj(self.objects.copyString(name).asObj()));
+            self.push(Value.initObj(ObjNative.init(&self.objects, function).asObj()));
+            _ = self.globals.set(self.stack[0].asObj().asString(), self.stack[1]);
             _ = self.pop();
             _ = self.pop();
         }
@@ -705,7 +706,7 @@ pub fn VM(comptime flags: Flags) type {
                 parser.markCompilerRoots();
             }
             if (self.initString) |initString| {
-                initString.obj.mark();
+                initString.asObj().mark();
             }
         }
 
@@ -746,5 +747,5 @@ pub fn VM(comptime flags: Flags) type {
 fn clockNative(argCount: u8, args: []Value) Value {
     _ = argCount;
     _ = args;
-    return .{ .number = @intToFloat(f64, std.time.milliTimestamp()) / 1000.0 };
+    return Value.initNumber(@intToFloat(f64, std.time.milliTimestamp()) / 1000.0);
 }

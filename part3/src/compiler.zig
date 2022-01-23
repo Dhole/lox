@@ -203,7 +203,7 @@ pub fn Parser(comptime flags: Flags) type {
             self.block();
 
             const fun = self.endCompiler();
-            self.emitBytes(@enumToInt(OpCode.CLOSURE), self.makeConstant(.{ .obj = fun.asObj() }));
+            self.emitBytes(@enumToInt(OpCode.CLOSURE), self.makeConstant(Value.initObj(fun.asObj())));
 
             var i: usize = 0;
             while (i < fun.upvalueCount) : (i += 1) {
@@ -644,7 +644,7 @@ pub fn Parser(comptime flags: Flags) type {
             const value = std.fmt.parseFloat(f64, self.previous.value) catch |e| {
                 std.debug.panic("{}", .{e});
             };
-            _ = self.emitConstant(.{ .number = value });
+            _ = self.emitConstant(Value.initNumber(value));
         }
 
         fn or_(self: *Self, canAssign: bool) void {
@@ -662,7 +662,7 @@ pub fn Parser(comptime flags: Flags) type {
         fn string(self: *Self, canAssign: bool) void {
             _ = canAssign;
             const objString = self.objects.copyString(self.previous.value[1 .. self.previous.value.len - 1]);
-            _ = self.emitConstant(.{ .obj = objString.asObj() });
+            _ = self.emitConstant(Value.initObj(objString.asObj()));
         }
 
         fn namedVariable(self: *Self, name: Token, canAssign: bool) void {
@@ -775,7 +775,7 @@ pub fn Parser(comptime flags: Flags) type {
         }
 
         fn identifierConstant(self: *Self, name: *const Token) u8 {
-            return self.makeConstant(.{ .obj = self.objects.copyString(name.value).asObj() });
+            return self.makeConstant(Value.initObj(self.objects.copyString(name.value).asObj()));
         }
 
         fn identifiersEqual(a: *const Token, b: *const Token) bool {

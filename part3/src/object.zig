@@ -62,8 +62,8 @@ pub const Objects = struct {
         var string = self.allocateObject(ObjString, ObjType.string);
         string.chars = chars;
         string.hash = hash;
-        g.vm.push(.{ .obj = string.asObj() });
-        _ = self.strings.set(string, .nil);
+        g.vm.push(Value.initObj(string.asObj()));
+        _ = self.strings.set(string, Value.initNil());
         _ = g.vm.pop();
         return string;
     }
@@ -123,7 +123,7 @@ pub const ObjUpvalue = struct {
 
     pub fn init(objects: *Objects, slot: *Value) *Self {
         var upvalue = objects.allocateObject(ObjUpvalue, ObjType.upvalue);
-        upvalue.closed = .nil;
+        upvalue.closed = Value.initNil();
         upvalue.location = slot;
         upvalue.next = null;
         return upvalue;
@@ -213,7 +213,7 @@ pub const Obj = struct {
         }
         if (debugLogGC) {
             print("{*} mark ", .{self});
-            printValue(.{ .obj = self });
+            printValue(Value.initObj(self));
             print("\n", .{});
         }
         self.isMarked = true;
@@ -228,7 +228,7 @@ pub const Obj = struct {
     pub fn blacken(self: *Self) void {
         if (debugLogGC) {
             print("{*} blacken ", .{self});
-            printValue(.{ .obj = self });
+            printValue(Value.initObj(self));
             print("\n", .{});
         }
         switch (self.type) {
@@ -276,7 +276,7 @@ pub const Obj = struct {
     pub fn deinit(self: *Self) void {
         if (debugLogGC) {
             print("{*} free type {} ", .{ self, self.type });
-            printValue(.{ .obj = self });
+            printValue(Value.initObj(self));
             print("\n", .{});
         }
         switch (self.type) {
